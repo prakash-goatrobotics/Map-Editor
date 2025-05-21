@@ -103,20 +103,41 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
   if (!mapData) return <div className="flex items-center justify-center min-h-screen">Loading...</div>;
 
   return (
-    <>
-    <div className='fixed right-20 top-3 text-xl text-white font-mono'>
-        TOOLBAR
+    <div className="flex h-screen">
+      {/* Main Map View */}
+      <div className="w-3/4 h-full p-4 bg-[#cdcdcd]">
+        <Canvas orthographic camera={{ zoom: 1, position: [0, 0, 100]}}>
+          <ambientLight />
+          <OrthographicCamera makeDefault position={[0, 0, 100]} zoom={1} />
+          <OrbitControls enablePan={true} enableZoom={true} enableRotate={true} />
+          <MapTexturePlane mapData={mapData} />
+        </Canvas>
       </div>
-    <div className="fixed inset-y-0 left-0 w-4/5 m-5 p-0 overflow-hidden bg-[#cdcdcd]">
-      
-      <Canvas orthographic camera={{ zoom: 1, position: [0, 0, 100]}}>
-        <ambientLight />
-        <OrthographicCamera makeDefault position={[0, 0, 100]} zoom={1} />
-        <OrbitControls enablePan={true} enableZoom={true} enableRotate={true} />
-        <MapTexturePlane mapData={mapData} />
-      </Canvas>
+
+      {/* Right Panel with Toolbar */}
+      <div className="w-1/4 h-full bg-gray-200 border-l border-gray-300">
+        <div className="p-4 border-b border-gray-300">
+          <h2 className="text-xl font-semibold text-gray-800">Tools</h2>
+        </div>
+        <div className="p-4 space-y-4">
+          {/* Toolbar Items */}
+          {/*<div className="space-y-2">
+            <button className="w-full px-4 py-2 text-sm text-gray-800 bg-gray-100 rounded hover:bg-gray-300 transition-colors border border-gray-300">
+              Draw Wall
+            </button>
+            <button className="w-full px-4 py-2 text-sm text-gray-800 bg-gray-100 rounded hover:bg-gray-300 transition-colors border border-gray-300">
+              Erase
+            </button>
+            <button className="w-full px-4 py-2 text-sm text-gray-800 bg-gray-100 rounded hover:bg-gray-300 transition-colors border border-gray-300">
+              Save Map
+            </button>
+            <button className="w-full px-4 py-2 text-sm text-gray-800 bg-gray-100 rounded hover:bg-gray-300 transition-colors border border-gray-300">
+              Load Map
+            </button>
+          </div>*/}
+        </div>
+      </div>
     </div>
-    </>
   );
 };
 
@@ -238,4 +259,5 @@ export default PGMMapLoader;
 // };
 
 // export default PGMMapLoader; 
+
 
