@@ -1,3 +1,131 @@
+import React, { useEffect, useState, useMemo } from 'react';
+import { Canvas } from '@react-three/fiber';
+import { OrthographicCamera, OrbitControls } from '@react-three/drei';
+import * as THREE from 'three';
+import PGMWorkerManager from '../workers/PGMWorkerManager';
+import ImageViewer from './PGMViewer';
+
+
+interface MapData {
+  data: Uint8ClampedArray;
+  width: number;
+  height: number;
+}
+
+interface PGMMapLoaderProps {
+  sourceType: 'file' | 'ros';
+  content: {
+    data: string | any;
+    info?: {
+      width: number;
+      height: number;
+    };
+  };
+}
+
+const MapTexturePlane: React.FC<{ mapData: MapData }> = ({ mapData }) => {
+  const texture = useMemo(() => {
+    const { width, height, data } = mapData;
+    const textureData = new THREE.DataTexture(data, width, height, THREE.RGBAFormat);
+    textureData.needsUpdate = true;
+    return textureData;
+  }, [mapData]);
+
+  return (
+    <mesh>
+      <planeGeometry args={[mapData.width, mapData.height]} />
+      <meshBasicMaterial map={texture} toneMapped={false} />
+    </mesh>
+  );
+};
+
+const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
+  const [mapData, setMapData] = useState<MapData | null>(null);
+
+  useEffect(() => {
+    const manager = PGMWorkerManager.getInstance();
+
+    const processData = async () => {
+      if (props.sourceType === "file") {
+        try {
+          const response = await fetch(props.content.data);
+          if (!response.ok) throw new Error("Failed to fetch file.");
+          const arrayBuffer = await response.arrayBuffer();
+          const imageViewer = new ImageViewer(arrayBuffer);
+          const message = {
+            mapData: {
+              info: {
+                width: imageViewer.width,
+                height: imageViewer.height,
+              },
+              data: imageViewer.data,
+            },
+            sourceType: "pgmFile",
+          };
+          const data = await manager.process(message);
+          setMapData({
+            data: data.data,
+            width: data.width,
+            height: data.height,
+          });
+        } catch (err) {
+          console.error("[PGMMapLoader] Error processing file:", err);
+        }
+      } else if (props.sourceType === "ros") {
+        try {
+          const occupancyGrid = props.content;
+          if (!occupancyGrid.info) throw new Error("Missing map info");
+          const width = occupancyGrid.info.width;
+          const height = occupancyGrid.info.height;
+          const occupancyData = new Int8Array(occupancyGrid.data);
+          const message = {
+            mapData: {
+              info: { width, height },
+              data: occupancyData,
+            },
+            sourceType: "rosMap",
+          };
+          const data = await manager.process(message);
+          setMapData({
+            data: data.data,
+            width: data.width,
+            height: data.height,
+          });
+        } catch (err) {
+          console.error("[PGMMapLoader] Error processing ROS map:", err);
+        }
+      }
+    };
+
+    processData();
+  }, [props.sourceType, props.content]);
+
+  if (!mapData) return <div className="flex items-center justify-center min-h-screen">Loading...</div>;
+
+  return (
+    <>
+    <div className='fixed right-20 top-3 text-xl text-white font-mono'>
+        TOOLBAR
+      </div>
+    <div className="fixed inset-y-0 left-0 w-4/5 m-5 p-0 overflow-hidden bg-[#cdcdcd]">
+      
+      <Canvas orthographic camera={{ zoom: 1, position: [0, 0, 100]}}>
+        <ambientLight />
+        <OrthographicCamera makeDefault position={[0, 0, 100]} zoom={1} />
+        <OrbitControls enablePan={true} enableZoom={true} enableRotate={true} />
+        <MapTexturePlane mapData={mapData} />
+      </Canvas>
+    </div>
+    </>
+  );
+};
+
+export default PGMMapLoader;
+
+
+
+
+//code given before
 // import React, { useEffect, useState } from 'react';
 // import PGMWorkerManager from '../workers/PGMWorkerManager';
 // import ImageViewer from './PGMViewer';
@@ -111,125 +239,3 @@
 
 // export default PGMMapLoader; 
 
-
-
-
-
-
-import React, { useEffect, useState, useMemo } from 'react';
-import { Canvas } from '@react-three/fiber';
-import { OrthographicCamera, OrbitControls } from '@react-three/drei';
-import * as THREE from 'three';
-import PGMWorkerManager from '../workers/PGMWorkerManager';
-import ImageViewer from './PGMViewer';
-
-
-interface MapData {
-  data: Uint8ClampedArray;
-  width: number;
-  height: number;
-}
-
-interface PGMMapLoaderProps {
-  sourceType: 'file' | 'ros';
-  content: {
-    data: string | any;
-    info?: {
-      width: number;
-      height: number;
-    };
-  };
-}
-
-const MapTexturePlane: React.FC<{ mapData: MapData }> = ({ mapData }) => {
-  const texture = useMemo(() => {
-    const { width, height, data } = mapData;
-    const textureData = new THREE.DataTexture(data, width, height, THREE.RGBAFormat);
-    textureData.needsUpdate = true;
-    return textureData;
-  }, [mapData]);
-
-  return (
-    <mesh>
-      <planeGeometry args={[mapData.width, mapData.height]} />
-      <meshBasicMaterial map={texture} toneMapped={false} />
-    </mesh>
-  );
-};
-
-const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
-  const [mapData, setMapData] = useState<MapData | null>(null);
-
-  useEffect(() => {
-    const manager = PGMWorkerManager.getInstance();
-
-    const processData = async () => {
-      if (props.sourceType === "file") {
-        try {
-          const response = await fetch(props.content.data);
-          if (!response.ok) throw new Error("Failed to fetch file.");
-          const arrayBuffer = await response.arrayBuffer();
-          const imageViewer = new ImageViewer(arrayBuffer);
-          const message = {
-            mapData: {
-              info: {
-                width: imageViewer.width,
-                height: imageViewer.height,
-              },
-              data: imageViewer.data,
-            },
-            sourceType: "pgmFile",
-          };
-          const data = await manager.process(message);
-          setMapData({
-            data: data.data,
-            width: data.width,
-            height: data.height,
-          });
-        } catch (err) {
-          console.error("[PGMMapLoader] Error processing file:", err);
-        }
-      } else if (props.sourceType === "ros") {
-        try {
-          const occupancyGrid = props.content;
-          if (!occupancyGrid.info) throw new Error("Missing map info");
-          const width = occupancyGrid.info.width;
-          const height = occupancyGrid.info.height;
-          const occupancyData = new Int8Array(occupancyGrid.data);
-          const message = {
-            mapData: {
-              info: { width, height },
-              data: occupancyData,
-            },
-            sourceType: "rosMap",
-          };
-          const data = await manager.process(message);
-          setMapData({
-            data: data.data,
-            width: data.width,
-            height: data.height,
-          });
-        } catch (err) {
-          console.error("[PGMMapLoader] Error processing ROS map:", err);
-        }
-      }
-    };
-
-    processData();
-  }, [props.sourceType, props.content]);
-
-  if (!mapData) return <div className="flex items-center justify-center min-h-screen">Loading...</div>;
-
-  return (
-    <div className="fixed inset-0 m-0 p-0 overflow-hidden bg-black">
-      <Canvas orthographic camera={{ zoom: 1, position: [0, 0, 100]}}>
-        <ambientLight />
-        <OrthographicCamera makeDefault position={[0, 0, 100]} zoom={1} />
-        <OrbitControls enablePan={true} enableZoom={true} enableRotate={true} />
-        <MapTexturePlane mapData={mapData} />
-      </Canvas>
-    </div>
-  );
-};
-
-export default PGMMapLoader;
