@@ -63,6 +63,22 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
   
   // Dragging state managed here and passed to CroppedImageDragger
   const [draggingImageId, setDraggingImageId] = useState<string | null>(null);
+  const cameraRef = useRef<THREE.OrthographicCamera>(null);
+  const controlsRef = useRef<any>(null);
+
+  // Reset camera when entering crop mode
+  useEffect(() => {
+    if (isCropMode && cameraRef.current && controlsRef.current) {
+      // Reset camera position and zoom
+      cameraRef.current.position.set(0, 0, 100);
+      cameraRef.current.zoom = 1;
+      cameraRef.current.updateProjectionMatrix();
+      
+      // Reset controls target
+      controlsRef.current.target.set(0, 0, 0);
+      controlsRef.current.update();
+    }
+  }, [isCropMode]);
 
   useEffect(() => {
     const manager = PGMWorkerManager.getInstance();
@@ -145,13 +161,19 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
       <div className="absolute inset-0 bg-[#cdcdcd]">
         <Canvas orthographic camera={{ zoom: 1, position: [0, 0, 100]}}>
           <ambientLight />
-          <OrthographicCamera makeDefault position={[0, 0, 100]} zoom={1} />
+          <OrthographicCamera 
+            ref={cameraRef}
+            makeDefault 
+            position={[0, 0, 100]} 
+            zoom={1} 
+          />
           {/* Orbit controls enabled only when NOT in crop mode or dragging */}
           <OrbitControls 
-            enablePan={!isCropMode && !draggingImageId} // Disable when dragging
-            enableZoom={!isCropMode && !draggingImageId} // Disable when dragging
+            ref={controlsRef}
+            enablePan={!isCropMode && !draggingImageId}
+            enableZoom={!isCropMode && !draggingImageId}
             enableRotate={false}
-            autoRotate={false} // Disable automatic rotation
+            autoRotate={false}
             target={new THREE.Vector3(0, 0, 0)} 
           />
           {/* Main map */}
@@ -191,8 +213,7 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
           <div className="space-y-2">
             <button 
               className={`w-full px-4 py-2 text-sm text-gray-800 bg-gray-100 rounded hover:bg-gray-300 transition-colors border border-gray-300 ${isCropMode ? 'bg-blue-500 text-white' : ''}`}
-              onClick={() => setIsCropMode(!isCropMode)}
-            >
+              onClick={() => setIsCropMode(!isCropMode)}>
               
               {isCropMode ? 'Cancel Crop' : 'Crop Map'}
             </button>
@@ -320,7 +341,4 @@ export default PGMMapLoader;
 //   );
 // };
 
-// export default PGMMapLoader; 
-
-
-
+// export default PGMMapLoader;

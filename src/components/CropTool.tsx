@@ -5,7 +5,7 @@ import * as THREE from 'three';
 // const mouse = new THREE.Vector2(
 //     ((event.clientX - rect.left) / rect.width) * 2 - 1,
 //     -((event.clientY - rect.top) / rect.height) * 2 + 1
-//       );
+//       );
 
 interface CropToolProps {
   // Target mesh to crop from

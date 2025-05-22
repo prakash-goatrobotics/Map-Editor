@@ -193,4 +193,4 @@ const CroppedImageDragger: React.FC<CroppedImageDraggerProps> = ({
   );
 };
 
-export default CroppedImageDragger; 
+export default CroppedImageDragger;
