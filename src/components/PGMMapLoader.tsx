@@ -1,15 +1,22 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrthographicCamera, OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import PGMWorkerManager from '../workers/PGMWorkerManager';
 import ImageViewer from './PGMViewer';
-
+import CropTool from './cropTool';
+import CroppedImageDragger from './CroppedImageDragger';
+import type { ThreeEvent } from '@react-three/fiber';
 
 interface MapData {
   data: Uint8ClampedArray;
   width: number;
   height: number;
+}
+
+interface CroppedImageData extends MapData {
+  id: string;
+  position: [number, number, number];
 }
 
 interface PGMMapLoaderProps {
@@ -23,16 +30,27 @@ interface PGMMapLoaderProps {
   };
 }
 
-const MapTexturePlane: React.FC<{ mapData: MapData }> = ({ mapData }) => {
+interface MapTexturePlaneProps {
+  mapData: MapData | CroppedImageData; 
+  position?: [number, number, number];
+  // onPointerDown is now handled by CroppedImageDragger for cropped images
+  // onPointerDown?: (event: ThreeEvent<PointerEvent>) => void; 
+}
+
+const MapTexturePlane: React.FC<MapTexturePlaneProps> = ({ mapData, position }) => {
   const texture = useMemo(() => {
     const { width, height, data } = mapData;
+    // Use RedFormat for grayscale compatibility
     const textureData = new THREE.DataTexture(data, width, height, THREE.RGBAFormat);
     textureData.needsUpdate = true;
     return textureData;
   }, [mapData]);
 
   return (
-    <mesh>
+    <mesh 
+      position={position || [0, 0, 0]}
+      // onPointerDown={onPointerDown}
+    >
       <planeGeometry args={[mapData.width, mapData.height]} />
       <meshBasicMaterial map={texture} toneMapped={false} />
     </mesh>
@@ -41,6 +59,11 @@ const MapTexturePlane: React.FC<{ mapData: MapData }> = ({ mapData }) => {
 
 const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
   const [mapData, setMapData] = useState<MapData | null>(null);
+  const [isCropMode, setIsCropMode] = useState(false);
+  const [croppedImages, setCroppedImages] = useState<CroppedImageData[]>([]);
+  
+  // Dragging state managed here and passed to CroppedImageDragger
+  const [draggingImageId, setDraggingImageId] = useState<string | null>(null);
 
   useEffect(() => {
     const manager = PGMWorkerManager.getInstance();
@@ -100,6 +123,21 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
     processData();
   }, [props.sourceType, props.content]);
 
+  // Handle crop completion
+  const handleCropComplete = (data: Uint8ClampedArray, width: number, height: number) => {
+    setCroppedImages(prev => [
+      ...prev,
+      {
+        id: THREE.MathUtils.generateUUID(), // Assign a unique ID
+        data, 
+        width, 
+        height,
+        position: [0, -(prev.length + 1) * (height / 2 + 10), 0.3 + prev.length * 0.1], // Stack below main map
+      }
+    ]);
+    setIsCropMode(false);
+  };
+
   if (!mapData) return <div className="flex items-center justify-center min-h-screen">Loading...</div>;
 
   return (
@@ -109,8 +147,33 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
         <Canvas orthographic camera={{ zoom: 1, position: [0, 0, 100]}}>
           <ambientLight />
           <OrthographicCamera makeDefault position={[0, 0, 100]} zoom={1} />
-          <OrbitControls enablePan={true} enableZoom={true} enableRotate={true} />
+          {/* Orbit controls enabled only when NOT in crop mode or dragging */}
+          <OrbitControls 
+            enablePan={!isCropMode && !draggingImageId} // Disable when dragging
+            enableZoom={!isCropMode && !draggingImageId} // Disable when dragging
+            enableRotate={false} 
+            target={new THREE.Vector3(0, 0, 0)} 
+          />
+          {/* Main map */}
           <MapTexturePlane mapData={mapData} />
+          {/* Crop tool overlay */}
+          {isCropMode && mapData && (
+            <CropTool
+              mapWidth={mapData.width}
+              mapHeight={mapData.height}
+              onCropComplete={handleCropComplete}
+              enabled={isCropMode}
+            />
+          )}
+          {/* Cropped images and dragger */}
+          {/* CroppedImageDragger renders the MapTexturePlane components for cropped images */}
+          <CroppedImageDragger 
+            croppedImages={croppedImages}
+            setCroppedImages={setCroppedImages}
+            isCropMode={isCropMode}
+            draggingImageId={draggingImageId} // Pass dragging state down
+            setDraggingImageId={setDraggingImageId} // Pass setter down
+          />
         </Canvas>
       </div>
 
@@ -121,20 +184,14 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
         </div>
         <div className="p-4 space-y-4">
           {/* Toolbar Items */}
-          {/*<div className="space-y-2">
-            <button className="w-full px-4 py-2 text-sm text-gray-800 bg-gray-100 rounded hover:bg-gray-300 transition-colors border border-gray-300">
-              Draw Wall
+          <div className="space-y-2">
+            <button 
+              className={`w-full px-4 py-2 text-sm text-gray-800 bg-gray-100 rounded hover:bg-gray-300 transition-colors border border-gray-300 ${isCropMode ? 'bg-blue-500 text-white' : ''}`}
+              onClick={() => setIsCropMode(!isCropMode)}
+            >
+              {isCropMode ? 'Cancel Crop' : 'Crop Map'}
             </button>
-            <button className="w-full px-4 py-2 text-sm text-gray-800 bg-gray-100 rounded hover:bg-gray-300 transition-colors border border-gray-300">
-              Erase
-            </button>
-            <button className="w-full px-4 py-2 text-sm text-gray-800 bg-gray-100 rounded hover:bg-gray-300 transition-colors border border-gray-300">
-              Save Map
-            </button>
-            <button className="w-full px-4 py-2 text-sm text-gray-800 bg-gray-100 rounded hover:bg-gray-300 transition-colors border border-gray-300">
-              Load Map
-            </button>
-          </div>*/}
+          </div>
         </div>
       </div>
     </div>
