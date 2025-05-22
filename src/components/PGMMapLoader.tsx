@@ -4,9 +4,8 @@ import { OrthographicCamera, OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import PGMWorkerManager from '../workers/PGMWorkerManager';
 import ImageViewer from './PGMViewer';
-import CropTool from './cropTool';
+import CropTool from './CropTool';
 import CroppedImageDragger from './CroppedImageDragger';
-import type { ThreeEvent } from '@react-three/fiber';
 
 interface MapData {
   data: Uint8ClampedArray;
@@ -141,9 +140,9 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
   if (!mapData) return <div className="flex items-center justify-center min-h-screen">Loading...</div>;
 
   return (
-    <div className="flex h-screen">
+    <div className="relative w-screen h-screen">
       {/* Main Map View */}
-      <div className="w-3/4 h-full p-4 bg-[#cdcdcd]">
+      <div className="absolute inset-0 bg-[#cdcdcd]">
         <Canvas orthographic camera={{ zoom: 1, position: [0, 0, 100]}}>
           <ambientLight />
           <OrthographicCamera makeDefault position={[0, 0, 100]} zoom={1} />
@@ -151,7 +150,8 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
           <OrbitControls 
             enablePan={!isCropMode && !draggingImageId} // Disable when dragging
             enableZoom={!isCropMode && !draggingImageId} // Disable when dragging
-            enableRotate={false} 
+            enableRotate={false}
+            autoRotate={false} // Disable automatic rotation
             target={new THREE.Vector3(0, 0, 0)} 
           />
           {/* Main map */}
@@ -159,10 +159,14 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
           {/* Crop tool overlay */}
           {isCropMode && mapData && (
             <CropTool
-              mapWidth={mapData.width}
-              mapHeight={mapData.height}
+              dimensions={{
+                width: mapData.width,
+                height: mapData.height
+              }}
               onCropComplete={handleCropComplete}
               enabled={isCropMode}
+              selectionColor="rgba(157, 149, 173, 0.74)"
+              cropRectColor="rgba(0, 0, 255, 0.3)"
             />
           )}
           {/* Cropped images and dragger */}
@@ -178,7 +182,7 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
       </div>
 
       {/* Right Panel with Toolbar */}
-      <div className="w-1/4 h-full bg-gray-200 border-l border-gray-300">
+      <div className="absolute right-0 top-0 w-80 h-full bg-white/60 shadow-lg backdrop-blur-md">
         <div className="p-4 border-b border-gray-300">
           <h2 className="text-xl font-semibold text-gray-800">Tools</h2>
         </div>
@@ -189,6 +193,7 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
               className={`w-full px-4 py-2 text-sm text-gray-800 bg-gray-100 rounded hover:bg-gray-300 transition-colors border border-gray-300 ${isCropMode ? 'bg-blue-500 text-white' : ''}`}
               onClick={() => setIsCropMode(!isCropMode)}
             >
+              
               {isCropMode ? 'Cancel Crop' : 'Crop Map'}
             </button>
           </div>

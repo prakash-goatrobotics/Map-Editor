@@ -23,27 +23,33 @@ interface MapTexturePlaneProps {
 }
 
 // Define MapTexturePlane here since it's used within CroppedImageDragger to render cropped images
-const MapTexturePlane: React.FC<MapTexturePlaneProps> = ({ mapData, position, onPointerDown }) => {
+const MapTexturePlane: React.FC<MapTexturePlaneProps> = ({
+  mapData, position, onPointerDown
+}) => {
   const texture = useMemo(() => {
     const { width, height, data } = mapData;
+
+    // Use RGBAFormat for compatibility, but specify RedFormat and UnsignedByteType
+    // for correct grayscale interpretation by Three.js
     const textureData = new THREE.DataTexture(data, width, height, THREE.RGBAFormat);
+    textureData.type = THREE.UnsignedByteType; // Data is byte array
+    textureData.format = THREE.RGBAFormat; // Treat single channel as Red/Luminance
     textureData.needsUpdate = true;
     return textureData;
   }, [mapData]);
 
   const meshRef = useRef<THREE.Mesh>(null);
 
-  // Attach the image id and position to the mesh's userData
+  // Attach the image data to the mesh's userData for easy access in event handlers
   useEffect(() => {
     if (meshRef.current) {
-      meshRef.current.userData.id = mapData.id;
-      meshRef.current.userData.position = mapData.position;
+      meshRef.current.userData = mapData; // Store the entire image data object
     }
-  }, [mapData.id, mapData.position]);
+  }, [mapData]); // Depend on mapData to update userData if the image data changes
 
 
   return (
-    <mesh 
+    <mesh
       ref={meshRef}
       position={position || [0, 0, 0]}
       onPointerDown={onPointerDown}
@@ -59,7 +65,7 @@ interface CroppedImageDraggerProps {
   setCroppedImages: React.Dispatch<React.SetStateAction<CroppedImageData[]>>;
   isCropMode: boolean;
   // Pass dragging state up to parent for OrbitControls
-  draggingImageId: string | null; // Accept draggingImageId as prop
+  draggingImageId: string | null;
   setDraggingImageId: React.Dispatch<React.SetStateAction<string | null>>; 
 }
 
@@ -67,19 +73,23 @@ const CroppedImageDragger: React.FC<CroppedImageDraggerProps> = ({
   croppedImages,
   setCroppedImages,
   isCropMode,
-  draggingImageId, // Destructure from props
-  setDraggingImageId, 
+  draggingImageId,
+  setDraggingImageId,
 }) => {
+  // console.log('CroppedImageDragger rendered with:', { 
+  //   numImages: croppedImages.length, 
+  //   isCropMode, 
+  //   draggingImageId 
+  // });
+
   const { camera, gl } = useThree();
-  // Internal state for dragging, kept in sync with parent via prop
   const [draggingImageIdInternal, setDraggingImageIdInternal] = useState<string | null>(draggingImageId);
-  // Offset from image position to click point (in world coordinates)
-  const dragOffsetRef = useRef<THREE.Vector3>(new THREE.Vector3()); 
+  const dragOffsetRef = useRef<THREE.Vector3>(new THREE.Vector3());
 
   const raycaster = useMemo(() => new THREE.Raycaster(), []);
   const pointer = useMemo(() => new THREE.Vector2(), []);
-  // Plane at z=0 where dragging happens
-  const dragPlane = useMemo(() => new THREE.Plane(new THREE.Vector3(0, 0, 1), 0), []);
+  // Plane at the initial Z of the clicked object for dragging
+  const dragPlane = useMemo(() => new THREE.Plane(), []);
   // Intersection point on the drag plane
   const intersection = useMemo(() => new THREE.Vector3(), []); 
 
@@ -90,38 +100,51 @@ const CroppedImageDragger: React.FC<CroppedImageDraggerProps> = ({
 
   // Handle pointer down on a cropped image to initiate drag
   const onImagePointerDown = (event: ThreeEvent<PointerEvent>) => {
-    if (isCropMode) return; // Disable dragging in crop mode
-    
-    const clickedImage = event.object.userData as CroppedImageData; // Get image data from mesh userData
+    // console.log('onImagePointerDown triggered');
+    if (isCropMode) {
+      // console.log('Ignoring pointer down - crop mode active');
+      return;
+    }
+
+    const clickedImage = event.object.userData as CroppedImageData;
     const id = clickedImage.id;
-    if (!id) return;
+    // console.log('Clicked image:', { id, position: clickedImage.position });
 
-    setDraggingImageIdInternal(id); 
-    setDraggingImageId(id); // Update parent state to disable OrbitControls
+    if (!id) {
+      // console.log('No image ID found');
+      return;
+    }
 
-    event.stopPropagation(); // Stop event from bubbling up
-    (event.nativeEvent.target as any).setPointerCapture(event.pointerId); // Capture pointer using native event
+    setDraggingImageIdInternal(id);
+    setDraggingImageId(id);
 
-    // Calculate and store the offset from the image's position to the click point (event.point)
-    // This offset is in world coordinates.
+    event.stopPropagation();
+    (event.nativeEvent.target as any).setPointerCapture(event.pointerId);
+
+    dragPlane.setFromNormalAndCoplanarPoint(
+      new THREE.Vector3(0, 0, 1),
+      new THREE.Vector3(...clickedImage.position)
+    );
+
     dragOffsetRef.current.copy(event.point).sub(new THREE.Vector3(...clickedImage.position));
+    // console.log('Drag offset set:', dragOffsetRef.current);
   };
 
   // Handle pointer move while dragging on the canvas (using native DOM event)
   const onCanvasPointerMove = (event: PointerEvent) => {
-    if (draggingImageIdInternal && isCropMode === false) { 
-      // Use clientX/Y from the native DOM event to get screen coordinates for raycasting
+    if (draggingImageIdInternal && isCropMode === false) {
+      // console.log('Canvas pointer move');
       pointer.x = (event.clientX / gl.domElement.clientWidth) * 2 - 1;
       pointer.y = -(event.clientY / gl.domElement.clientHeight) * 2 + 1;
       raycaster.setFromCamera(pointer, camera);
 
-      // Find the intersection point on the drag plane based on the current pointer position
       if (raycaster.ray.intersectPlane(dragPlane, intersection)) {
-        setCroppedImages(prev => 
+        // console.log('Intersection found:', intersection);
+        setCroppedImages(prev =>
           prev.map(img => {
             if (img.id === draggingImageIdInternal) {
-              // Calculate the new image position: current pointer position on plane - stored offset
               const newPosition = intersection.clone().sub(dragOffsetRef.current);
+              // console.log('New position calculated:', newPosition);
               return { ...img, position: [newPosition.x, newPosition.y, img.position[2]] };
             }
             return img;
@@ -134,9 +157,10 @@ const CroppedImageDragger: React.FC<CroppedImageDraggerProps> = ({
   // Handle pointer up on the canvas to stop dragging
   const onCanvasPointerUp = (event: PointerEvent) => {
     if (draggingImageIdInternal) {
-       (event.target as any).releasePointerCapture(event.pointerId);
-       setDraggingImageIdInternal(null); 
-       setDraggingImageId(null); // Update parent state
+      // console.log('Pointer up - ending drag');
+      (event.target as any).releasePointerCapture(event.pointerId);
+      setDraggingImageIdInternal(null);
+      setDraggingImageId(null);
     }
   };
 
@@ -149,19 +173,22 @@ const CroppedImageDragger: React.FC<CroppedImageDraggerProps> = ({
       canvas.removeEventListener('pointermove', onCanvasPointerMove);
       canvas.removeEventListener('pointerup', onCanvasPointerUp);
     };
-  }, [gl, draggingImageIdInternal, isCropMode, setCroppedImages, setDraggingImageId, dragOffsetRef]); // Added dragOffsetRef to deps
+  }, [gl, draggingImageIdInternal, isCropMode, setCroppedImages, setDraggingImageId, dragOffsetRef, dragPlane]);
 
    // Render the cropped images with the pointer down handler attached
   return (
     <>
-      {croppedImages.map((croppedImage) => (
-        <MapTexturePlane 
-          key={croppedImage.id}
-          mapData={croppedImage}
-          position={croppedImage.position}
-          onPointerDown={onImagePointerDown} // Attach handler here
-        />
-      ))}
+      {croppedImages.map((croppedImage) => {
+        // console.log('Rendering cropped image:', croppedImage.id);
+        return (
+          <MapTexturePlane
+            key={croppedImage.id}
+            mapData={croppedImage}
+            position={croppedImage.position}
+            onPointerDown={onImagePointerDown}
+          />
+        );
+      })}
     </>
   );
 };
