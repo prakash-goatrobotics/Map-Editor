@@ -1,9 +1,13 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrthographicCamera, OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
+import { Slider, Space, Typography } from 'antd';
+import { RotateLeftOutlined, RotateRightOutlined } from '@ant-design/icons';
 import PGMWorkerManager from '../workers/PGMWorkerManager';
 import ImageViewer from './PGMViewer';
+import MapRotationControls from './MapRotationControls';
+import { useMapRotation } from '../hooks/useMapRotation';
 
 
 interface MapData {
@@ -23,7 +27,7 @@ interface PGMMapLoaderProps {
   };
 }
 
-const MapTexturePlane: React.FC<{ mapData: MapData }> = ({ mapData }) => {
+const MapTexturePlane: React.FC<{ mapData: MapData; rotation: number }> = ({ mapData, rotation }) => {
   const texture = useMemo(() => {
     const { width, height, data } = mapData;
     const textureData = new THREE.DataTexture(data, width, height, THREE.RGBAFormat);
@@ -32,7 +36,7 @@ const MapTexturePlane: React.FC<{ mapData: MapData }> = ({ mapData }) => {
   }, [mapData]);
 
   return (
-    <mesh>
+    <mesh rotation={[0, 0, THREE.MathUtils.degToRad(rotation)]}>
       <planeGeometry args={[mapData.width, mapData.height]} />
       <meshBasicMaterial map={texture} toneMapped={false} />
     </mesh>
@@ -41,6 +45,14 @@ const MapTexturePlane: React.FC<{ mapData: MapData }> = ({ mapData }) => {
 
 const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
   const [mapData, setMapData] = useState<MapData | null>(null);
+  const controlsRef = useRef<any>(null);
+  const {
+    rotation,
+    isSelected,
+    mapContainerRef,
+    handleRotationChange,
+    handleMapClick,
+  } = useMapRotation();
 
   useEffect(() => {
     const manager = PGMWorkerManager.getInstance();
@@ -103,20 +115,44 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
   if (!mapData) return <div className="flex items-center justify-center min-h-screen">Loading...</div>;
 
   return (
-    <>
-    <div className='fixed right-20 top-3 text-xl text-white font-mono'>
-        TOOLBAR
+    <div className="flex h-screen">
+      {/* Main Map View */}
+      <div 
+        ref={mapContainerRef}
+        className="w-3/4 h-full p-4 bg-[#cdcdcd] relative"
+      >
+        <div 
+          className={`absolute inset-0 ${isSelected ? 'ring-2 ring-blue-500' : ''}`}
+          onClick={handleMapClick}
+        >
+          <Canvas orthographic camera={{ zoom: 1, position: [0, 0, 100]}}>
+            <ambientLight />
+            <OrthographicCamera makeDefault position={[0, 0, 100]} zoom={1} />
+            <OrbitControls 
+              ref={controlsRef}
+              enablePan={true} 
+              enableZoom={true} 
+              enableRotate={!isSelected} 
+            />
+            <MapTexturePlane mapData={mapData} rotation={rotation} />
+          </Canvas>
+        </div>
       </div>
-    <div className="fixed inset-y-0 left-0 w-4/5 m-5 p-0 overflow-hidden bg-[#cdcdcd]">
-      
-      <Canvas orthographic camera={{ zoom: 1, position: [0, 0, 100]}}>
-        <ambientLight />
-        <OrthographicCamera makeDefault position={[0, 0, 100]} zoom={1} />
-        <OrbitControls enablePan={true} enableZoom={true} enableRotate={true} />
-        <MapTexturePlane mapData={mapData} />
-      </Canvas>
+
+      {/* Right Panel with Toolbar */}
+      <div className="w-1/4 h-full bg-gray-200 border-l border-gray-300">
+        <div className="p-4 border-b border-gray-300">
+          <h2 className="text-xl font-semibold text-gray-800">Tools</h2>
+        </div>
+        <div className="p-4 space-y-6">
+          <MapRotationControls
+            rotation={rotation}
+            isSelected={isSelected}
+            onRotationChange={handleRotationChange}
+          />
+        </div>
+      </div>
     </div>
-    </>
   );
 };
 
