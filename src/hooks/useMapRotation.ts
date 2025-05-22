@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef } from 'react';
 
 interface UseMapRotationReturn {
   rotation: number;
@@ -21,21 +21,8 @@ export const useMapRotation = (): UseMapRotationReturn => {
 
   const handleMapClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setIsSelected(true);
+    setIsSelected(prev => !prev); // Toggle selection state
   };
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (mapContainerRef.current && !mapContainerRef.current.contains(event.target as Node)) {
-        setIsSelected(false);
-      }
-    };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, []);
 
   return {
     rotation,
