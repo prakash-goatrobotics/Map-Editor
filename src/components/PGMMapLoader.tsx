@@ -6,6 +6,8 @@ import PGMWorkerManager from '../workers/PGMWorkerManager';
 import ImageViewer from './PGMViewer';
 import CropTool from './CropTool';
 import CroppedImageDragger from './CroppedImageDragger';
+import MapRotationControls from './MapRotationControls';
+import { useMapRotation } from '../hooks/useMapRotation';
 
 interface MapData {
   data: Uint8ClampedArray;
@@ -30,16 +32,14 @@ interface PGMMapLoaderProps {
 }
 
 interface MapTexturePlaneProps {
-  mapData: MapData | CroppedImageData; 
+  mapData: MapData | CroppedImageData;
   position?: [number, number, number];
-  // onPointerDown is now handled by CroppedImageDragger for cropped images
-  // onPointerDown?: (event: ThreeEvent<PointerEvent>) => void; 
+  rotation?: number;
 }
 
-const MapTexturePlane: React.FC<MapTexturePlaneProps> = ({ mapData, position }) => {
+const MapTexturePlane: React.FC<MapTexturePlaneProps> = ({ mapData, position, rotation = 0 }) => {
   const texture = useMemo(() => {
     const { width, height, data } = mapData;
-    // Use RedFormat for grayscale compatibility
     const textureData = new THREE.DataTexture(data, width, height, THREE.RGBAFormat);
     textureData.needsUpdate = true;
     return textureData;
@@ -48,7 +48,7 @@ const MapTexturePlane: React.FC<MapTexturePlaneProps> = ({ mapData, position }) 
   return (
     <mesh 
       position={position || [0, 0, 0]}
-      // onPointerDown={onPointerDown}
+      rotation={[0, 0, THREE.MathUtils.degToRad(rotation)]}
     >
       <planeGeometry args={[mapData.width, mapData.height]} />
       <meshBasicMaterial map={texture} toneMapped={false} />
@@ -60,21 +60,24 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
   const [mapData, setMapData] = useState<MapData | null>(null);
   const [isCropMode, setIsCropMode] = useState(false);
   const [croppedImages, setCroppedImages] = useState<CroppedImageData[]>([]);
-  
-  // Dragging state managed here and passed to CroppedImageDragger
   const [draggingImageId, setDraggingImageId] = useState<string | null>(null);
   const cameraRef = useRef<THREE.OrthographicCamera>(null);
   const controlsRef = useRef<any>(null);
+  
+  const {
+    rotation,
+    isSelected,
+    mapContainerRef,
+    handleRotationChange,
+    handleMapClick,
+  } = useMapRotation();
 
   // Reset camera when entering crop mode
   useEffect(() => {
     if (isCropMode && cameraRef.current && controlsRef.current) {
-      // Reset camera position and zoom
       cameraRef.current.position.set(0, 0, 100);
       cameraRef.current.zoom = 1;
       cameraRef.current.updateProjectionMatrix();
-      
-      // Reset controls target
       controlsRef.current.target.set(0, 0, 0);
       controlsRef.current.update();
     }
@@ -143,11 +146,11 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
     setCroppedImages(prev => [
       ...prev,
       {
-        id: THREE.MathUtils.generateUUID(), // Assign a unique ID
+        id: THREE.MathUtils.generateUUID(),
         data, 
         width, 
         height,
-        position: [0, -(prev.length + 1) * (height / 2 + 10), 0.3 + prev.length * 0.1], // Stack below main map
+        position: [0, -(prev.length + 1) * (height / 2 + 10), 0.3 + prev.length * 0.1],
       }
     ]);
     setIsCropMode(false);
@@ -158,49 +161,55 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
   return (
     <div className="relative w-screen h-screen">
       {/* Main Map View */}
-      <div className="absolute inset-0 bg-[#cdcdcd]">
-        <Canvas orthographic camera={{ zoom: 1, position: [0, 0, 100]}}>
-          <ambientLight />
-          <OrthographicCamera 
-            ref={cameraRef}
-            makeDefault 
-            position={[0, 0, 100]} 
-            zoom={1} 
-          />
-          {/* Orbit controls enabled only when NOT in crop mode or dragging */}
-          <OrbitControls 
-            ref={controlsRef}
-            enablePan={!isCropMode && !draggingImageId}
-            enableZoom={!isCropMode && !draggingImageId}
-            enableRotate={false}
-            autoRotate={false}
-            target={new THREE.Vector3(0, 0, 0)} 
-          />
-          {/* Main map */}
-          <MapTexturePlane mapData={mapData} />
-          {/* Crop tool overlay */}
-          {isCropMode && mapData && (
-            <CropTool
-              dimensions={{
-                width: mapData.width,
-                height: mapData.height
-              }}
-              onCropComplete={handleCropComplete}
-              enabled={isCropMode}
-              selectionColor="rgba(157, 149, 173, 0.74)"
-              cropRectColor="rgba(0, 0, 255, 0.3)"
+      <div 
+        ref={mapContainerRef}
+        className="absolute inset-0 bg-[#cdcdcd]"
+      >
+        <div 
+          className={`absolute inset-0 ${isSelected ? 'ring-2 ring-blue-500' : ''}`}
+          onClick={handleMapClick}
+        >
+          <Canvas orthographic camera={{ zoom: 1, position: [0, 0, 100]}}>
+            <ambientLight />
+            <OrthographicCamera 
+              ref={cameraRef}
+              makeDefault 
+              position={[0, 0, 100]} 
+              zoom={1} 
             />
-          )}
-          {/* Cropped images and dragger */}
-          {/* CroppedImageDragger renders the MapTexturePlane components for cropped images */}
-          <CroppedImageDragger 
-            croppedImages={croppedImages}
-            setCroppedImages={setCroppedImages}
-            isCropMode={isCropMode}
-            draggingImageId={draggingImageId} // Pass dragging state down
-            setDraggingImageId={setDraggingImageId} // Pass setter down
-          />
-        </Canvas>
+            <OrbitControls 
+              ref={controlsRef}
+              enablePan={!isCropMode && !draggingImageId}
+              enableZoom={!isCropMode && !draggingImageId}
+              enableRotate={false}
+              autoRotate={false}
+              target={new THREE.Vector3(0, 0, 0)} 
+            />
+            {/* Main map */}
+            <MapTexturePlane mapData={mapData} rotation={rotation} />
+            {/* Crop tool overlay */}
+            {isCropMode && mapData && (
+              <CropTool
+                dimensions={{
+                  width: mapData.width,
+                  height: mapData.height
+                }}
+                onCropComplete={handleCropComplete}
+                enabled={isCropMode}
+                selectionColor="rgba(157, 149, 173, 0.74)"
+                cropRectColor="rgba(0, 0, 255, 0.3)"
+              />
+            )}
+            {/* Cropped images and dragger */}
+            <CroppedImageDragger 
+              croppedImages={croppedImages}
+              setCroppedImages={setCroppedImages}
+              isCropMode={isCropMode}
+              draggingImageId={draggingImageId}
+              setDraggingImageId={setDraggingImageId}
+            />
+          </Canvas>
+        </div>
       </div>
 
       {/* Right Panel with Toolbar */}
@@ -208,16 +217,23 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
         <div className="p-4 border-b border-gray-300">
           <h2 className="text-xl font-semibold text-gray-800">Tools</h2>
         </div>
-        <div className="p-4 space-y-4">
-          {/* Toolbar Items */}
+        <div className="p-4 space-y-6">
+          {/* Crop Tool */}
           <div className="space-y-2">
             <button 
               className={`w-full px-4 py-2 text-sm text-gray-800 bg-gray-100 rounded hover:bg-gray-300 transition-colors border border-gray-300 ${isCropMode ? 'bg-blue-500 text-white' : ''}`}
-              onClick={() => setIsCropMode(!isCropMode)}>
-              
+              onClick={() => setIsCropMode(!isCropMode)}
+            >
               {isCropMode ? 'Cancel Crop' : 'Crop Map'}
             </button>
           </div>
+          
+          {/* Rotation Controls */}
+          <MapRotationControls
+            rotation={rotation}
+            isSelected={isSelected}
+            onRotationChange={handleRotationChange}
+          />
         </div>
       </div>
     </div>
