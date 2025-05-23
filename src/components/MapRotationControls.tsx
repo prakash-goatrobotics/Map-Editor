@@ -28,11 +28,25 @@ const MapRotationControls: React.FC<MapRotationControlsProps> = ({
   };
 
   return (
-    <div className="space-y-4">
-      <Typography.Text strong className="block text-gray-800">
-        Map Rotation {isSelected ? '(Selected)' : '(Not Selected)'}
-      </Typography.Text>
-      
+    <div className="flex-col space-y-4">
+      <div className="flex items-center justify-between mb-2">
+        <Typography.Text strong className="block text-gray-800">
+          Map Rotation
+        </Typography.Text>
+        <div className="flex items-center gap-1 whitespace-nowrap">
+          <Typography.Text className="text-gray-600">Angle:</Typography.Text>
+          <Input
+            type="number"
+            value={rotation}
+            onChange={handleAngleInput}
+            disabled={!isSelected}
+            className="w-14"
+            suffix="°"
+            min={-180}
+            max={180}
+          />
+        </div>
+      </div>
       <Space direction="vertical" className="w-full">
         <div className="flex items-center gap-2">
           <RotateLeftOutlined style={{ color: 'black', fill: 'black' }} />
@@ -47,25 +61,10 @@ const MapRotationControls: React.FC<MapRotationControlsProps> = ({
           />
           <RotateRightOutlined style={{ color: 'black', fill: 'black' }} />
         </div>
-
-        <div className="flex items-center gap-1 w-30">
-          <Typography.Text className="text-gray-600 w-20">Angle:</Typography.Text>
-          <Input
-            type="number"
-            value={rotation}
-            onChange={handleAngleInput}
-            disabled={!isSelected}
-            className="w-20"
-            suffix="°"
-            min={-180}
-            max={180}
-          />
-        </div>
       </Space>
-
-      <Typography.Text type="secondary" className="block text-sm">
+      {/*<Typography.Text type="secondary" className="block text-sm">
         {isSelected ? 'Click the map again to deselect' : 'Click the map to enable rotation'}
-      </Typography.Text>
+      </Typography.Text>*/}
     </div>
   );
 };
