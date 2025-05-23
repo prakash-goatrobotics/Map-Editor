@@ -341,6 +341,17 @@ const CropTool = forwardRef<unknown, CropToolProps>((props, ref) => {
       const worldToTexScaleX = originalWidth / mapWidth
       const worldToTexScaleY = originalHeight / mapHeight
 
+      //TESTING
+      // console.log("=== Crop Debug Info ===")
+      // console.log("Rotation (degrees):", rotation)
+      // console.log("Rotation (radians):", rotationRad)
+      // console.log("Crop area:", { minX, maxX, minY, maxY })
+      // console.log("Crop dimensions:", { cropWidth, cropHeight })
+      // console.log("Original texture dimensions:", { originalWidth, originalHeight })
+      // console.log("Map dimensions:", { mapWidth, mapHeight })
+      // console.log("Scale factors:", { worldToTexScaleX, worldToTexScaleY })
+      // console.log("Background color:", { bgR, bgG, bgB })
+
       // For each pixel in the cropped area
       for (let y = 0; y < cropHeight; y++) {
         for (let x = 0; x < cropWidth; x++) {
@@ -391,6 +402,10 @@ const CropTool = forwardRef<unknown, CropToolProps>((props, ref) => {
           }
         }
       }
+
+      //TESTING
+      // console.log("Crop processing completed successfully")
+      // console.log("========================")
 
       // Return the cropped data with its dimensions
       return {
