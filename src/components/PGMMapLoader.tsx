@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useEffect, useState, useRef, forwardRef } from "react"
+import React, { useEffect, useState, useRef, forwardRef, useCallback } from "react"
 import { Canvas } from "@react-three/fiber"
 import { OrthographicCamera, OrbitControls } from "@react-three/drei"
 import * as THREE from "three"
@@ -10,6 +10,9 @@ import CropTool from "./CropTool"
 import CroppedImageDragger from "./CroppedImageDragger"
 import MapRotationControls from "./MapRotationControls"
 import { useMapRotation } from "../hooks/useMapRotation"
+
+// Background color constant - used for consistency
+const BACKGROUND_COLOR = "#cdcdcd"
 
 interface MapData {
   data: Uint8ClampedArray
@@ -54,7 +57,12 @@ const MapTexturePlane = forwardRef<THREE.Mesh, MapTexturePlaneProps>(({ mapData,
   return (
     <mesh ref={meshRef} position={position || [0, 0, 0]} rotation={[0, 0, THREE.MathUtils.degToRad(rotation)]}>
       <planeGeometry args={[mapData.width, mapData.height]} />
-      <meshBasicMaterial map={texture} toneMapped={false} />
+      <meshBasicMaterial
+        map={texture}
+        toneMapped={false}
+        transparent={true} // Enable transparency
+        alphaTest={0.01} // Discard pixels with very low alpha
+      />
     </mesh>
   )
 })
@@ -73,20 +81,92 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
   const cropToolRef = useRef<any>(null)
   const mapMeshRef = useRef<any>(null)
   const [isCropToolEnabled, setIsCropToolEnabled] = useState(false)
+  const [currentRotation, setCurrentRotation] = useState(0) // Track rotation for cropping
 
-  // Get rotation state and handlers from the hook
-  const { rotation, setRotation, isSelected, mapContainerRef, handleRotationChange, handleMapClick } = useMapRotation()
+  // Store the initial camera state to prevent unwanted rotations
+  const initialCameraState = useRef({
+    position: new THREE.Vector3(0, 0, 100),
+    rotation: new THREE.Euler(0, 0, 0),
+    zoom: 1,
+  })
 
-  // Reset camera when entering crop mode
+  const { rotation, isSelected, mapContainerRef, handleRotationChange, handleMapClick } = useMapRotation()
+
+  // Update current rotation when rotation changes
   useEffect(() => {
-    if (isCropMode && cameraRef.current && controlsRef.current) {
-      cameraRef.current.position.set(0, 0, 100)
-      cameraRef.current.zoom = 1
+    setCurrentRotation(rotation)
+  }, [rotation])
+
+  // Function to reset camera to safe state
+  const resetCameraToSafeState = useCallback(() => {
+    if (cameraRef.current && controlsRef.current) {
+      // Reset camera position and rotation
+      cameraRef.current.position.copy(initialCameraState.current.position)
+      cameraRef.current.rotation.copy(initialCameraState.current.rotation)
+      cameraRef.current.zoom = initialCameraState.current.zoom
       cameraRef.current.updateProjectionMatrix()
+
+      // Reset controls target and update
       controlsRef.current.target.set(0, 0, 0)
+      controlsRef.current.object.position.copy(initialCameraState.current.position)
+      controlsRef.current.object.rotation.copy(initialCameraState.current.rotation)
       controlsRef.current.update()
+
+      // Force controls to respect the disabled state
+      controlsRef.current.enableRotate = !isCropMode && !draggingImageId
+      controlsRef.current.enablePan = !isCropMode && !draggingImageId
+      controlsRef.current.enableZoom = !isCropMode && !draggingImageId
     }
-  }, [isCropMode])
+  }, [isCropMode, draggingImageId])
+
+  // Reset camera when entering crop mode with additional safety measures
+  useEffect(() => {
+    if (isCropMode) {
+      resetCameraToSafeState()
+
+      // Additional safety: disable all controls immediately
+      if (controlsRef.current) {
+        controlsRef.current.enableRotate = false
+        controlsRef.current.enablePan = false
+        controlsRef.current.enableZoom = false
+        controlsRef.current.autoRotate = false
+        controlsRef.current.update()
+      }
+    } else {
+      // When exiting crop mode, re-enable controls but keep camera stable
+      if (controlsRef.current) {
+        controlsRef.current.enableRotate = false // Keep rotation disabled by default
+        controlsRef.current.enablePan = !draggingImageId
+        controlsRef.current.enableZoom = !draggingImageId
+        controlsRef.current.autoRotate = false
+        controlsRef.current.update()
+      }
+    }
+  }, [isCropMode, resetCameraToSafeState, draggingImageId])
+
+  // Monitor and prevent unwanted camera changes
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (cameraRef.current && controlsRef.current) {
+        // Check if camera has been accidentally rotated
+        const currentRotation = cameraRef.current.rotation
+        if (Math.abs(currentRotation.x) > 0.01 || Math.abs(currentRotation.y) > 0.01) {
+          console.warn("Detected unwanted camera rotation, resetting...")
+          resetCameraToSafeState()
+        }
+
+        // Ensure controls stay disabled when they should be
+        if (isCropMode || draggingImageId) {
+          if (controlsRef.current.enableRotate) {
+            controlsRef.current.enableRotate = false
+            controlsRef.current.update()
+          }
+        }
+      }
+    }, 100) // Check every 100ms
+
+    return () => clearInterval(interval)
+  }, [isCropMode, draggingImageId, resetCameraToSafeState])
 
   useEffect(() => {
     const manager = PGMWorkerManager.getInstance()
@@ -146,14 +226,11 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
     processData()
   }, [props.sourceType, props.content])
 
-  // New: Save crop handler
+  // Save crop handler
   const handleSaveCrop = () => {
     if (cropToolRef.current) {
       const cropResult = cropToolRef.current.getCropRect()
       if (cropResult && mapData) {
-        // Reset rotation to 0 when saving a crop to prevent tilting
-        setRotation(0)
-
         // Replace the original map data with the cropped data
         setMapData({
           data: cropResult.data,
@@ -161,9 +238,17 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
           height: cropResult.height,
         })
 
+        // Reset rotation after cropping to prevent compounding rotations
+        handleRotationChange(0)
+
         setTempCropData(null)
         setIsCropMode(false)
         setIsCropToolEnabled(false)
+
+        // Reset camera after cropping to prevent tilting
+        setTimeout(() => {
+          resetCameraToSafeState()
+        }, 50)
       }
     }
   }
@@ -173,17 +258,41 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
     setTempCropData(null)
     setIsCropMode(false)
     setIsCropToolEnabled(false)
+
+    // Reset camera after canceling crop to prevent tilting
+    setTimeout(() => {
+      resetCameraToSafeState()
+    }, 50)
   }
+
+  // Enhanced map click handler to prevent rotation issues
+  const handleMapClickSafe = useCallback(
+    (event: any) => {
+      // Prevent any rotation during map selection
+      if (controlsRef.current) {
+        controlsRef.current.enableRotate = false
+        controlsRef.current.update()
+      }
+
+      handleMapClick(event)
+
+      // Reset camera to ensure no tilting
+      setTimeout(() => {
+        resetCameraToSafeState()
+      }, 10)
+    },
+    [handleMapClick, resetCameraToSafeState],
+  )
 
   if (!mapData) return <div className="flex items-center justify-center min-h-screen">Loading...</div>
 
   return (
     <div className="relative w-screen h-screen">
       {/* Main Map View */}
-      <div ref={mapContainerRef} className="absolute inset-0 bg-[#28282B]">
+      <div ref={mapContainerRef} className="absolute inset-0 bg-[#28282B]" >
         <div
           className={`absolute inset-0 ${isSelected ? "ring-4 ring-blue-500 ring-opacity-70" : ""} cursor-pointer`}
-          onClick={handleMapClick}
+          onClick={handleMapClickSafe}
         >
           <Canvas orthographic camera={{ zoom: 1, position: [0, 0, 100] }}>
             <ambientLight />
@@ -192,9 +301,13 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
               ref={controlsRef}
               enablePan={!isCropMode && !draggingImageId}
               enableZoom={!isCropMode && !draggingImageId}
-              enableRotate={!isCropMode && !draggingImageId}
+              enableRotate={false} // Always disable rotation to prevent tilting
               autoRotate={false}
               target={new THREE.Vector3(0, 0, 0)}
+              minPolarAngle={Math.PI / 2} // Lock to top-down view
+              maxPolarAngle={Math.PI / 2} // Lock to top-down view
+              minAzimuthAngle={0} // Prevent horizontal rotation
+              maxAzimuthAngle={0} // Prevent horizontal rotation
             />
             {/* Main map */}
             <MapTexturePlane ref={mapMeshRef} mapData={mapData} rotation={rotation} />
@@ -209,9 +322,10 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
                 }}
                 enabled={isCropToolEnabled}
                 selectionColor="transparent"
-                cropRectColor="#cdcdcd" // Exact match with background color
+                cropRectColor={BACKGROUND_COLOR} // Use the constant
                 cropRectOpacity={0.0} // Make it fully transparent
-                currentRotation={rotation} // Pass current rotation to crop tool
+                rotation={currentRotation} // Pass the current rotation to the crop tool
+                backgroundColor={BACKGROUND_COLOR} // Pass background color for transparent areas
               />
             )}
             {/* Cropped images and dragger */}
@@ -285,11 +399,6 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
               onRotationChange={handleRotationChange}
             />
             {isCropMode && <p className="text-xs text-gray-500 italic">Rotation is disabled during cropping</p>}
-          </div>
-
-          {/* Current Rotation Display */}
-          <div className="p-2 bg-gray-50 rounded border border-gray-200">
-            <p className="text-xs text-gray-600">Current rotation: {rotation}°</p>
           </div>
         </div>
       </div>

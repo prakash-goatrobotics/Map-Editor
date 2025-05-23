@@ -29,8 +29,10 @@ interface CropToolProps {
   cropRectColor?: string
   // Optional crop rectangle opacity
   cropRectOpacity?: number
-  // Current rotation of the map
-  currentRotation?: number
+  // Current rotation of the map in degrees
+  rotation?: number
+  // Background color for transparent areas
+  backgroundColor?: string
 }
 
 const CropTool = forwardRef<unknown, CropToolProps>((props, ref) => {
@@ -42,7 +44,8 @@ const CropTool = forwardRef<unknown, CropToolProps>((props, ref) => {
     selectionOpacity = 0.15,
     cropRectColor = BACKGROUND_COLOR, // Use the background color by default
     cropRectOpacity = 0.0, // Make it fully transparent since we're using the border
-    currentRotation = 0,
+    rotation = 0, // Current rotation in degrees
+    backgroundColor = "#cdcdcd", // Default background color
   } = props
   const { camera, gl, size, scene } = useThree()
   const [start, setStart] = useState<THREE.Vector2 | null>(null)
@@ -257,16 +260,6 @@ const CropTool = forwardRef<unknown, CropToolProps>((props, ref) => {
     }
   })
 
-  // Helper function to rotate a point around the origin
-  const rotatePoint = (point: THREE.Vector2, angleInDegrees: number): THREE.Vector2 => {
-    const angleInRadians = THREE.MathUtils.degToRad(-angleInDegrees) // Negative because we're counter-rotating
-    const cos = Math.cos(angleInRadians)
-    const sin = Math.sin(angleInRadians)
-    const x = point.x * cos - point.y * sin
-    const y = point.x * sin + point.y * cos
-    return new THREE.Vector2(x, y)
-  }
-
   // Expose getCropRect to parent
   useImperativeHandle(ref, () => ({
     getCropRect: () => {
@@ -298,121 +291,112 @@ const CropTool = forwardRef<unknown, CropToolProps>((props, ref) => {
       }
 
       // Get the original image data
-      const originalData = originalTexture.image.data as Uint8ClampedArray
+      const originalData = originalTexture.image.data  as Uint8ClampedArray
       const originalWidth = originalTexture.image.width
       const originalHeight = originalTexture.image.height
 
-      // Calculate the crop region in texture coordinates, accounting for rotation
-      // Convert from world coordinates to texture coordinates
-      const worldToTextureX = (x: number, y: number) => {
-        // If there's rotation, we need to counter-rotate the point first
-        let rotatedPoint = new THREE.Vector2(x, y)
-        if (currentRotation !== 0) {
-          rotatedPoint = rotatePoint(rotatedPoint, currentRotation)
-        }
-
-        // Map from world space [-width/2, width/2] to texture space [0, width]
-        return Math.round((rotatedPoint.x + mapWidth / 2) * (originalWidth / mapWidth))
-      }
-
-      const worldToTextureY = (x: number, y: number) => {
-        // If there's rotation, we need to counter-rotate the point first
-        let rotatedPoint = new THREE.Vector2(x, y)
-        if (currentRotation !== 0) {
-          rotatedPoint = rotatePoint(rotatedPoint, currentRotation)
-        }
-
-        // Map from world space [-height/2, height/2] to texture space [0, height]
-        return Math.round((rotatedPoint.y + mapHeight / 2) * (originalHeight / mapHeight))
-      }
-
-      // If the map is rotated, we need to create a new texture with the correct orientation
-      if (currentRotation !== 0) {
-        // Create a new render target for the rotated crop
-        const renderTarget = new THREE.WebGLRenderTarget(cropWidth, cropHeight)
-
-        // Create a temporary scene
-        const tempScene = new THREE.Scene()
-
-        // Create a new mesh with the original texture
-        const tempMaterial = new THREE.MeshBasicMaterial({ map: originalTexture })
-        const tempMesh = new THREE.Mesh(new THREE.PlaneGeometry(mapWidth, mapHeight), tempMaterial)
-
-        // Rotate the mesh to counter the current rotation
-        tempMesh.rotation.z = THREE.MathUtils.degToRad(-currentRotation)
-
-        // Position the mesh so the crop area is centered
-        const cropCenter = new THREE.Vector2((minX + maxX) / 2, (minY + maxY) / 2)
-        const rotatedCenter = rotatePoint(cropCenter, currentRotation)
-        tempMesh.position.set(-rotatedCenter.x, -rotatedCenter.y, 0)
-
-        tempScene.add(tempMesh)
-
-        // Create an orthographic camera for the crop area
-        const orthoCamera = new THREE.OrthographicCamera(
-          cropWidth / -2,
-          cropWidth / 2,
-          cropHeight / 2,
-          cropHeight / -2,
-          0.1,
-          10,
-        )
-        orthoCamera.position.z = 5
-
-        // Render the scene to the render target
-        gl.setRenderTarget(renderTarget)
-        gl.render(tempScene, orthoCamera)
-        gl.setRenderTarget(null)
-
-        // Read the pixels from the render target
-        const pixels = new Uint8Array(cropWidth * cropHeight * 4)
-        gl.readRenderTargetPixels(renderTarget, 0, 0, cropWidth, cropHeight, pixels)
-
-        // Clean up
-        renderTarget.dispose()
-        tempMaterial.dispose()
-
-        // Return the cropped and correctly oriented data
-        return {
-          data: new Uint8ClampedArray(pixels),
-          width: cropWidth,
-          height: cropHeight,
-        }
-      }
-
-      // If there's no rotation, use the direct pixel copying approach
-      // Calculate texture coordinates for the crop region
-      const texMinX = Math.max(0, worldToTextureX(minX, minY))
-      const texMaxX = Math.min(originalWidth, worldToTextureX(maxX, maxY))
-      const texMinY = Math.max(0, worldToTextureY(minX, minY))
-      const texMaxY = Math.min(originalHeight, worldToTextureY(maxX, maxY))
-
-      // Calculate the actual dimensions of the cropped texture
-      const texWidth = texMaxX - texMinX
-      const texHeight = texMaxY - texMinY
-
       // Create a new array for the cropped data
-      const croppedData = new Uint8ClampedArray(texWidth * texHeight * 4)
+      const croppedData = new Uint8ClampedArray(cropWidth * cropHeight * 4)
 
-      // Copy the pixel data from the original texture to the cropped texture
-      for (let y = 0; y < texHeight; y++) {
-        for (let x = 0; x < texWidth; x++) {
-          const srcIdx = ((texMinY + y) * originalWidth + (texMinX + x)) * 4
-          const dstIdx = (y * texWidth + x) * 4
+      // Convert rotation to radians
+      const rotationRad = THREE.MathUtils.degToRad(rotation)
+      const cosTheta = Math.cos(rotationRad)
+      const sinTheta = Math.sin(rotationRad)
 
-          // Copy all four channels (RGBA)
-          croppedData[dstIdx] = originalData[srcIdx]
-          croppedData[dstIdx + 1] = originalData[srcIdx + 1]
-          croppedData[dstIdx + 2] = originalData[srcIdx + 2]
-          croppedData[dstIdx + 3] = originalData[srcIdx + 3]
+      // Parse the background color to RGB components
+      const parseColor = (color: string): [number, number, number] => {
+        // Handle hex format
+        if (color.startsWith("#")) {
+          const hex = color.slice(1)
+          if (hex.length === 3) {
+            // #RGB format
+            const r = Number.parseInt(hex[0] + hex[0], 16)
+            const g = Number.parseInt(hex[1] + hex[1], 16)
+            const b = Number.parseInt(hex[2] + hex[2], 16)
+            return [r, g, b]
+          } else if (hex.length === 6) {
+            // #RRGGBB format
+            const r = Number.parseInt(hex.slice(0, 2), 16)
+            const g = Number.parseInt(hex.slice(2, 4), 16)
+            const b = Number.parseInt(hex.slice(4, 6), 16)
+            return [r, g, b]
+          }
+        }
+        // Default to light gray if parsing fails
+        return [205, 205, 205]
+      }
+
+      // Get background color components
+      const [bgR, bgG, bgB] = parseColor(backgroundColor)
+
+      // Calculate the center of the original texture in world coordinates
+      const textureCenterWorldX = 0 // Assuming the texture is centered at origin
+      const textureCenterWorldY = 0
+
+      // Calculate the center of the crop area in world coordinates
+      const cropCenterWorldX = (minX + maxX) / 2
+      const cropCenterWorldY = (minY + maxY) / 2
+
+      // Scale factors to convert between world and texture coordinates
+      const worldToTexScaleX = originalWidth / mapWidth
+      const worldToTexScaleY = originalHeight / mapHeight
+
+      // For each pixel in the cropped area
+      for (let y = 0; y < cropHeight; y++) {
+        for (let x = 0; x < cropWidth; x++) {
+          // Calculate position relative to crop center in world coordinates
+          const relWorldX = x - cropWidth / 2
+          const relWorldY = y - cropHeight / 2
+
+          // Calculate absolute world coordinates for this pixel in the crop
+          const worldX = relWorldX + cropCenterWorldX
+          const worldY = relWorldY + cropCenterWorldY
+
+          // Calculate position relative to texture center
+          const relToTextureWorldX = worldX - textureCenterWorldX
+          const relToTextureWorldY = worldY - textureCenterWorldY
+
+          // Apply inverse rotation to find the corresponding point in the original texture
+          // This is the key step to handle rotation correctly
+          const rotatedWorldX = relToTextureWorldX * cosTheta + relToTextureWorldY * sinTheta
+          const rotatedWorldY = -relToTextureWorldX * sinTheta + relToTextureWorldY * cosTheta
+
+          // Convert back to absolute world coordinates
+          const originalWorldX = rotatedWorldX + textureCenterWorldX
+          const originalWorldY = rotatedWorldY + textureCenterWorldY
+
+          // Convert from world coordinates to texture coordinates
+          const texX = Math.round((originalWorldX + mapWidth / 2) * worldToTexScaleX)
+          const texY = Math.round((originalWorldY + mapHeight / 2) * worldToTexScaleY)
+
+          // Calculate destination index
+          const dstIdx = (y * cropWidth + x) * 4
+
+          // Check if the texture coordinates are within bounds
+          if (texX >= 0 && texX < originalWidth && texY >= 0 && texY < originalHeight) {
+            // Calculate source index
+            const srcIdx = (texY * originalWidth + texX) * 4
+
+            // Copy all four channels (RGBA)
+            croppedData[dstIdx] = originalData[srcIdx]
+            croppedData[dstIdx + 1] = originalData[srcIdx + 1]
+            croppedData[dstIdx + 2] = originalData[srcIdx + 2]
+            croppedData[dstIdx + 3] = originalData[srcIdx + 3]
+          } else {
+            // Out of bounds - set to background color with zero alpha
+            croppedData[dstIdx] = bgR
+            croppedData[dstIdx + 1] = bgG
+            croppedData[dstIdx + 2] = bgB
+            croppedData[dstIdx + 3] = 0 // Fully transparent
+          }
         }
       }
 
       // Return the cropped data with its dimensions
       return {
         data: croppedData,
-        width: texWidth,
-        height: texHeight,
+        width: cropWidth,
+        height: cropHeight,
       }
     },
   }))
