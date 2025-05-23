@@ -6,6 +6,7 @@ interface MapRotationControlsProps {
   rotation: number;
   isSelected: boolean;
   onRotationChange: (value: number) => void;
+  disabled?: boolean;
 }
 
 const MapRotationControls: React.FC<MapRotationControlsProps> = ({
