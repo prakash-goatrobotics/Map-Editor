@@ -1,14 +1,15 @@
 "use client"
 
-import React from "react"
-import { useRef, useState, useEffect, useImperativeHandle, forwardRef, useCallback, useMemo } from "react"
+import React, { useRef, useState, useEffect, useImperativeHandle, forwardRef, useMemo, useCallback } from "react"
 import { useThree, useFrame } from "@react-three/fiber"
 import * as THREE from "three"
-import type { MutableRefObject } from "react"
+import type { RefObject } from "react"
 
 const HANDLE_RADIUS = 6 // in world units, adjust as needed
-const HANDLE_COLOR = "white"
-const BORDER_COLOR = "black"
+const HANDLE_COLOR = "#ffffff"
+const HANDLE_HOVER_COLOR = "#666666"
+const BORDER_COLOR = "#000000"
+const BORDER_HOVER_COLOR = "#666666"
 const BACKGROUND_COLOR = "#cdcdcd" // Match the background color
 
 interface CropToolProps {
@@ -48,7 +49,7 @@ const CropTool = forwardRef<unknown, CropToolProps>((props, ref) => {
     backgroundColor = "#cdcdcd", // Default background color
   } = props
 
-  const { camera, gl, size, scene } = useThree()
+  const { camera, gl } = useThree()
 
   // State that affects rendering
   const [start, setStart] = useState<THREE.Vector2 | null>(null)
@@ -258,6 +259,8 @@ const CropTool = forwardRef<unknown, CropToolProps>((props, ref) => {
 
   // Optimize useFrame by checking if updates are needed
   useFrame(() => {
+    if (!enabled) return
+
     if (rectMeshRef.current && start && end) {
       const width = Math.abs(end.x - start.x)
       const height = Math.abs(end.y - start.y)
@@ -283,6 +286,8 @@ const CropTool = forwardRef<unknown, CropToolProps>((props, ref) => {
       const geometry = new THREE.BufferGeometry().setFromPoints(points)
       borderLineRef.current.geometry.dispose()
       borderLineRef.current.geometry = geometry
+      // Compute line distances for dashed material
+      borderLineRef.current.computeLineDistances()
     }
 
     // Reset the update flag
@@ -372,17 +377,6 @@ const CropTool = forwardRef<unknown, CropToolProps>((props, ref) => {
         const worldToTexScaleX = originalWidth / mapWidth
         const worldToTexScaleY = originalHeight / mapHeight
 
-        // Debug logging for testing
-        console.log("=== Crop Debug Info ===")
-        console.log("Rotation (degrees):", rotation)
-        console.log("Rotation (radians):", rotationRad)
-        console.log("Crop area:", { minX, maxX, minY, maxY })
-        console.log("Crop dimensions:", { cropWidth, cropHeight })
-        console.log("Original texture dimensions:", { originalWidth, originalHeight })
-        console.log("Map dimensions:", { mapWidth, mapHeight })
-        console.log("Scale factors:", { worldToTexScaleX, worldToTexScaleY })
-        console.log("Background color:", { bgR, bgG, bgB })
-
         // For each pixel in the cropped area
         for (let y = 0; y < cropHeight; y++) {
           for (let x = 0; x < cropWidth; x++) {
@@ -434,10 +428,6 @@ const CropTool = forwardRef<unknown, CropToolProps>((props, ref) => {
           }
         }
 
-        // Log completion
-        console.log("Crop processing completed successfully")
-        console.log("========================")
-
         // Return the cropped data with its dimensions
         return {
           data: croppedData,
@@ -465,7 +455,7 @@ const CropTool = forwardRef<unknown, CropToolProps>((props, ref) => {
         </mesh>
       )}
 
-      {/* Crop rectangle - now fully transparent to match background */}
+      {/* Crop rectangle */}
       {enabled && start && end && (
         <mesh ref={rectMeshRef}>
           <planeGeometry args={[1, 1]} />
@@ -473,15 +463,15 @@ const CropTool = forwardRef<unknown, CropToolProps>((props, ref) => {
         </mesh>
       )}
 
-      {/* Border-only rectangle using Line */}
+      {/* Border-only rectangle using Line with dashed material */}
       {enabled && start && end && (
-        <line ref={borderLineRef as MutableRefObject<any>}>
+        <line ref={borderLineRef as RefObject<any>}>
           <bufferGeometry />
-          <lineBasicMaterial color={BORDER_COLOR} linewidth={2} />
+          <lineDashedMaterial color={BORDER_COLOR} linewidth={2} dashSize={8} gapSize={4} />
         </line>
       )}
 
-      {/* Corner handles */}
+      {/* Corner handles with hover effect */}
       {enabled &&
         corners.map((corner, i) => (
           <mesh
@@ -490,8 +480,18 @@ const CropTool = forwardRef<unknown, CropToolProps>((props, ref) => {
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
+            onPointerOver={(e) => {
+              e.stopPropagation()
+              const material = (e.object as THREE.Mesh).material as THREE.MeshBasicMaterial
+              material.color.set(HANDLE_HOVER_COLOR)
+            }}
+            onPointerOut={(e) => {
+              e.stopPropagation()
+              const material = (e.object as THREE.Mesh).material as THREE.MeshBasicMaterial
+              material.color.set(HANDLE_COLOR)
+            }}
           >
-            <sphereGeometry args={[HANDLE_RADIUS, 16, 16]} /> {/* Use sphere for easier interaction */}
+            <sphereGeometry args={[HANDLE_RADIUS, 16, 16]} />
             <meshBasicMaterial color={HANDLE_COLOR} />
           </mesh>
         ))}
@@ -499,5 +499,4 @@ const CropTool = forwardRef<unknown, CropToolProps>((props, ref) => {
   )
 })
 
-// Wrap with React.memo to prevent unnecessary re-renders
 export default React.memo(CropTool)

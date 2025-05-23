@@ -20,6 +20,14 @@ interface MapData {
   height: number
 }
 
+// Add interface for map state
+interface MapState {
+  data: Uint8ClampedArray
+  width: number
+  height: number
+  rotation: number
+}
+
 interface CroppedImageData extends MapData {
   id: string
   position: [number, number, number]
@@ -60,7 +68,12 @@ const MapTexturePlane = React.memo(
     return (
       <mesh ref={meshRef} position={position || [0, 0, 0]} rotation={[0, 0, THREE.MathUtils.degToRad(rotation)]}>
         <planeGeometry args={[mapData.width, mapData.height]} />
-        <meshBasicMaterial map={texture} toneMapped={false} transparent={true} alphaTest={0.01} />
+        <meshBasicMaterial
+          map={texture}
+          toneMapped={false}
+          transparent={true} // Enable transparency
+          alphaTest={0.01} // Discard pixels with very low alpha
+        />
       </mesh>
     )
   }),
@@ -72,16 +85,16 @@ const PGMMapLoader = React.memo<PGMMapLoaderProps>((props) => {
   const [isCropMode, setIsCropMode] = useState(false)
   const [croppedImages, setCroppedImages] = useState<CroppedImageData[]>([])
   const [draggingImageId, setDraggingImageId] = useState<string | null>(null)
-
-  // Use useRef instead of useState for data that doesn't affect rendering
-  const tempCropDataRef = useRef<{ data: Uint8ClampedArray; width: number; height: number } | null>(null)
-  const isCropToolEnabledRef = useRef(false)
-  const currentRotationRef = useRef(0)
+  // Add state for undo stack
+  const [undoStack, setUndoStack] = useState<MapState[]>([])
+  const [canUndo, setCanUndo] = useState(false)
 
   const cameraRef = useRef<THREE.OrthographicCamera>(null)
   const controlsRef = useRef<any>(null)
   const cropToolRef = useRef<any>(null)
   const mapMeshRef = useRef<any>(null)
+  const [isCropToolEnabled, setIsCropToolEnabled] = useState(false)
+  const [currentRotation, setCurrentRotation] = useState(0) // Track rotation for cropping
 
   // Store the initial camera state to prevent unwanted rotations
   const initialCameraState = useRef({
@@ -92,12 +105,12 @@ const PGMMapLoader = React.memo<PGMMapLoaderProps>((props) => {
 
   const { rotation, isSelected, mapContainerRef, handleRotationChange, handleMapClick } = useMapRotation()
 
-  // Update current rotation ref when rotation changes
+  // Update current rotation when rotation changes
   useEffect(() => {
-    currentRotationRef.current = rotation
+    setCurrentRotation(rotation)
   }, [rotation])
 
-  // Function to reset camera to safe state - already using useCallback which is good
+  // Function to reset camera to safe state
   const resetCameraToSafeState = useCallback(() => {
     if (cameraRef.current && controlsRef.current) {
       // Reset camera position and rotation
@@ -228,11 +241,46 @@ const PGMMapLoader = React.memo<PGMMapLoaderProps>((props) => {
     processData()
   }, [processData])
 
-  // Optimize save crop handler with useCallback
+  // Save current state to undo stack
+  const saveToUndoStack = useCallback(
+    (currentMapData: MapData) => {
+      if (currentMapData) {
+        const newState: MapState = {
+          data: new Uint8ClampedArray(currentMapData.data),
+          width: currentMapData.width,
+          height: currentMapData.height,
+          rotation: rotation,
+        }
+        setUndoStack((prev) => [...prev, newState])
+        setCanUndo(true)
+      }
+    },
+    [rotation],
+  )
+
+  // Handle undo
+  const handleUndo = useCallback(() => {
+    if (undoStack.length > 0) {
+      const previousState = undoStack[undoStack.length - 1]
+      setMapData({
+        data: previousState.data,
+        width: previousState.width,
+        height: previousState.height,
+      })
+      handleRotationChange(previousState.rotation)
+      setUndoStack((prev) => prev.slice(0, -1))
+      setCanUndo(undoStack.length > 1)
+    }
+  }, [undoStack, handleRotationChange])
+
+  // Save crop handler
   const handleSaveCrop = useCallback(() => {
     if (cropToolRef.current) {
       const cropResult = cropToolRef.current.getCropRect()
       if (cropResult && mapData) {
+        // Save current state before cropping
+        saveToUndoStack(mapData)
+
         // Replace the original map data with the cropped data
         setMapData({
           data: cropResult.data,
@@ -243,10 +291,8 @@ const PGMMapLoader = React.memo<PGMMapLoaderProps>((props) => {
         // Reset rotation after cropping to prevent compounding rotations
         handleRotationChange(0)
 
-        // Update refs and state in a batch
-        tempCropDataRef.current = null
-        isCropToolEnabledRef.current = false
         setIsCropMode(false)
+        setIsCropToolEnabled(false)
 
         // Reset camera after cropping to prevent tilting
         setTimeout(() => {
@@ -254,13 +300,12 @@ const PGMMapLoader = React.memo<PGMMapLoaderProps>((props) => {
         }, 50)
       }
     }
-  }, [mapData, handleRotationChange, resetCameraToSafeState])
+  }, [mapData, handleRotationChange, resetCameraToSafeState, saveToUndoStack])
 
-  // Optimize cancel crop handler with useCallback
+  // Cancel crop
   const handleCancelCrop = useCallback(() => {
-    tempCropDataRef.current = null
-    isCropToolEnabledRef.current = false
     setIsCropMode(false)
+    setIsCropToolEnabled(false)
 
     // Reset camera after canceling crop to prevent tilting
     setTimeout(() => {
@@ -268,7 +313,7 @@ const PGMMapLoader = React.memo<PGMMapLoaderProps>((props) => {
     }, 50)
   }, [resetCameraToSafeState])
 
-  // Enhanced map click handler to prevent rotation issues - already using useCallback which is good
+  // Enhanced map click handler to prevent rotation issues
   const handleMapClickSafe = useCallback(
     (event: any) => {
       // Prevent any rotation during map selection
@@ -287,42 +332,13 @@ const PGMMapLoader = React.memo<PGMMapLoaderProps>((props) => {
     [handleMapClick, resetCameraToSafeState],
   )
 
-  // Memoize the crop button click handler
-  const handleCropButtonClick = useCallback(() => {
-    if (isSelected) {
-      setIsCropMode(true)
-      isCropToolEnabledRef.current = true
-    }
-  }, [isSelected])
-
-  // Memoize test rotation handlers
-  const handleTest1Click = useCallback(() => {
-    if (isSelected && !isCropMode) {
-      handleRotationChange(45)
-    }
-  }, [isSelected, isCropMode, handleRotationChange])
-
-  const handleTest2Click = useCallback(() => {
-    if (isSelected && !isCropMode) {
-      handleRotationChange(90)
-    }
-  }, [isSelected, isCropMode, handleRotationChange])
-
-  const handleTest3Click = useCallback(() => {
-    if (isSelected && !isCropMode) {
-      handleRotationChange(-30)
-    }
-  }, [isSelected, isCropMode, handleRotationChange])
-
-  const handleResetRotation = useCallback(() => {
-    if (isSelected && !isCropMode) {
-      handleRotationChange(0)
-    }
-  }, [isSelected, isCropMode, handleRotationChange])
-
-  // Memoize the loading state
+  // Loading state component
   const loadingComponent = useMemo(
-    () => <div className="flex items-center justify-center min-h-screen">Loading...</div>,
+    () => (
+      <div className="flex items-center justify-center min-h-screen bg-[#28282B]">
+        <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    ),
     [],
   )
 
@@ -331,9 +347,11 @@ const PGMMapLoader = React.memo<PGMMapLoaderProps>((props) => {
   return (
     <div className="relative w-screen h-screen">
       {/* Main Map View */}
-      <div ref={mapContainerRef} className="absolute inset-0" style={{ backgroundColor: BACKGROUND_COLOR }}>
+      <div ref={mapContainerRef} className="absolute inset-0 bg-[#28282B]">
         <div
-          className={`absolute inset-0 ${isSelected ? "ring-4 ring-blue-500 ring-opacity-70" : ""} cursor-pointer`}
+          className={`absolute inset-0 transition-all duration-300 ${
+            isSelected ? "ring-4 ring-blue-500 ring-opacity-70" : ""
+          } cursor-pointer`}
           onClick={handleMapClickSafe}
         >
           <Canvas orthographic camera={{ zoom: 1, position: [0, 0, 100] }}>
@@ -343,13 +361,13 @@ const PGMMapLoader = React.memo<PGMMapLoaderProps>((props) => {
               ref={controlsRef}
               enablePan={!isCropMode && !draggingImageId}
               enableZoom={!isCropMode && !draggingImageId}
-              enableRotate={false} // Always disable rotation to prevent tilting
+              enableRotate={false}
               autoRotate={false}
               target={new THREE.Vector3(0, 0, 0)}
-              minPolarAngle={Math.PI / 2} // Lock to top-down view
-              maxPolarAngle={Math.PI / 2} // Lock to top-down view
-              minAzimuthAngle={0} // Prevent horizontal rotation
-              maxAzimuthAngle={0} // Prevent horizontal rotation
+              minPolarAngle={Math.PI / 2}
+              maxPolarAngle={Math.PI / 2}
+              minAzimuthAngle={0}
+              maxAzimuthAngle={0}
             />
             {/* Main map */}
             <MapTexturePlane ref={mapMeshRef} mapData={mapData} rotation={rotation} />
@@ -362,12 +380,12 @@ const PGMMapLoader = React.memo<PGMMapLoaderProps>((props) => {
                   width: mapData.width,
                   height: mapData.height,
                 }}
-                enabled={isCropToolEnabledRef.current}
+                enabled={isCropToolEnabled}
                 selectionColor="transparent"
-                cropRectColor={BACKGROUND_COLOR} // Use the constant
-                cropRectOpacity={0.0} // Make it fully transparent
-                rotation={currentRotationRef.current} // Pass the current rotation to the crop tool
-                backgroundColor={BACKGROUND_COLOR} // Pass background color for transparent areas
+                cropRectColor={BACKGROUND_COLOR}
+                cropRectOpacity={0.0}
+                rotation={currentRotation}
+                backgroundColor={BACKGROUND_COLOR}
               />
             )}
             {/* Cropped images and dragger */}
@@ -383,14 +401,35 @@ const PGMMapLoader = React.memo<PGMMapLoaderProps>((props) => {
       </div>
 
       {/* Right Panel with Toolbar */}
-      <div className="absolute right-0 top-0 w-80 h-full bg-white/60 shadow-lg backdrop-blur-md">
-        <div className="p-4 border-b border-gray-300">
-          <h2 className="text-xl font-semibold text-gray-800">Tools</h2>
+      <div className="absolute right-0 top-0 w-80 h-full bg-white/80 shadow-lg backdrop-blur-md transition-all duration-300">
+        <div className="p-4 border-b border-gray-200 flex justify-between items-center">
+          <h2 className="text-xl font-semibold text-gray-800">Map Editor</h2>
+          <button
+            className={`px-3 py-1.5 text-sm rounded transition-all duration-200 ${
+              canUndo
+                ? "text-gray-700 bg-gray-200 hover:bg-gray-300 shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
+                : "text-gray-400 bg-gray-100 cursor-not-allowed opacity-50"
+            }`}
+            onClick={handleUndo}
+            disabled={!canUndo}
+          >
+            <div className="flex items-center space-x-1">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
+                />
+              </svg>
+              <span>Undo</span>
+            </div>
+          </button>
         </div>
         <div className="p-4 space-y-6">
           {/* Map Selection Status */}
           {!isSelected && (
-            <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-md">
+            <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-md animate-pulse">
               <p className="text-sm text-yellow-800">Click on the map to select it and enable tools</p>
             </div>
           )}
@@ -399,32 +438,57 @@ const PGMMapLoader = React.memo<PGMMapLoaderProps>((props) => {
           <div className="space-y-2">
             {!isCropMode && (
               <button
-                className={`w-full px-4 py-2 text-sm rounded transition-colors border ${
+                className={`w-full px-4 py-2 text-sm rounded transition-all duration-200 ${
                   isSelected
-                    ? "text-gray-800 bg-gray-100 hover:bg-gray-300 border-gray-300 cursor-pointer"
-                    : "text-gray-400 bg-gray-50 border-gray-200 cursor-not-allowed opacity-50"
+                    ? "text-gray-700 bg-gray-200 hover:bg-gray-300 shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
+                    : "text-gray-400 bg-gray-100 cursor-not-allowed opacity-50"
                 }`}
-                onClick={handleCropButtonClick}
+                onClick={() => {
+                  if (isSelected) {
+                    setIsCropMode(true)
+                    setIsCropToolEnabled(true)
+                  }
+                }}
                 disabled={!isSelected}
               >
-                Crop Map
+                <div className="flex items-center justify-center space-x-2">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
+                    />
+                  </svg>
+                  <span>Crop Map</span>
+                </div>
               </button>
             )}
             {isCropMode && (
-              <>
+              <div className="flex space-x-2">
                 <button
-                  className="w-full px-4 py-2 text-sm text-white bg-blue-600 rounded hover:bg-blue-700 transition-colors border border-blue-700"
+                  className="flex-1 px-4 py-2 text-sm text-gray-700 bg-gray-200 rounded hover:bg-gray-300 transition-all duration-200 shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
                   onClick={handleSaveCrop}
                 >
-                  Save Crop
+                  <div className="flex items-center justify-center space-x-2">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    <span>Save Crop</span>
+                  </div>
                 </button>
                 <button
-                  className="w-full px-4 py-2 text-sm text-gray-800 bg-gray-100 rounded hover:bg-gray-300 transition-colors border border-gray-300"
+                  className="flex-1 px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded hover:bg-gray-200 transition-all duration-200 shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
                   onClick={handleCancelCrop}
                 >
-                  Cancel
+                  <div className="flex items-center justify-center space-x-2">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                    <span>Cancel</span>
+                  </div>
                 </button>
-              </>
+              </div>
             )}
           </div>
 
@@ -432,10 +496,12 @@ const PGMMapLoader = React.memo<PGMMapLoaderProps>((props) => {
           <div className="space-y-2">
             <MapRotationControls
               rotation={rotation}
-              isSelected={isSelected && !isCropMode} // Disabled when not selected OR when cropping
+              isSelected={isSelected && !isCropMode}
               onRotationChange={handleRotationChange}
             />
-            {isCropMode && <p className="text-xs text-gray-500 italic">Rotation is disabled during cropping</p>}
+            {isCropMode && (
+              <p className="text-xs text-gray-500 italic animate-pulse">Rotation is disabled during cropping</p>
+            )}
           </div>
         </div>
       </div>
