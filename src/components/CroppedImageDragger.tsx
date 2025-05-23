@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useMemo, useState } from 'react';
 import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { ThreeEvent } from '@react-three/fiber';
+import { handleMousePoint } from '../utils/helper';
 
 // Assuming MapData is defined elsewhere or can be defined here
 // Based on PGMMapLoader.tsx:
@@ -26,16 +27,14 @@ interface MapTexturePlaneProps {
 const MapTexturePlane: React.FC<MapTexturePlaneProps> = ({
   mapData, position, onPointerDown
 }) => {
-  const texture = useMemo(() => {
+  const textureRef = useRef<THREE.DataTexture | null>(null);
+  useEffect(() => {
     const { width, height, data } = mapData;
-
-    // Use RGBAFormat for compatibility, but specify RedFormat and UnsignedByteType
-    // for correct grayscale interpretation by Three.js
     const textureData = new THREE.DataTexture(data, width, height, THREE.RGBAFormat);
-    textureData.type = THREE.UnsignedByteType; // Data is byte array
-    textureData.format = THREE.RGBAFormat; // Treat single channel as Red/Luminance
+    textureData.type = THREE.UnsignedByteType;
+    textureData.format = THREE.RGBAFormat;
     textureData.needsUpdate = true;
-    return textureData;
+    textureRef.current = textureData;
   }, [mapData]);
 
   const meshRef = useRef<THREE.Mesh>(null);
@@ -55,7 +54,7 @@ const MapTexturePlane: React.FC<MapTexturePlaneProps> = ({
       onPointerDown={onPointerDown}
     >
       <planeGeometry args={[mapData.width, mapData.height]} />
-      <meshBasicMaterial map={texture} toneMapped={false} />
+      <meshBasicMaterial map={textureRef.current} toneMapped={false} />
     </mesh>
   );
 };
@@ -66,7 +65,7 @@ interface CroppedImageDraggerProps {
   isCropMode: boolean;
   // Pass dragging state up to parent for OrbitControls
   draggingImageId: string | null;
-  setDraggingImageId: React.Dispatch<React.SetStateAction<string | null>>; 
+  setDraggingImageId: React.Dispatch<React.SetStateAction<string | null>>;
 }
 
 const CroppedImageDragger: React.FC<CroppedImageDraggerProps> = ({
@@ -87,11 +86,10 @@ const CroppedImageDragger: React.FC<CroppedImageDraggerProps> = ({
   const dragOffsetRef = useRef<THREE.Vector3>(new THREE.Vector3());
 
   const raycaster = useMemo(() => new THREE.Raycaster(), []);
-  const pointer = useMemo(() => new THREE.Vector2(), []);
   // Plane at the initial Z of the clicked object for dragging
   const dragPlane = useMemo(() => new THREE.Plane(), []);
   // Intersection point on the drag plane
-  const intersection = useMemo(() => new THREE.Vector3(), []); 
+  const intersection = useMemo(() => new THREE.Vector3(), []);
 
   // Keep internal dragging state in sync with parent prop
   useEffect(() => {
@@ -130,12 +128,15 @@ const CroppedImageDragger: React.FC<CroppedImageDraggerProps> = ({
     // console.log('Drag offset set:', dragOffsetRef.current);
   };
 
+
   // Handle pointer move while dragging on the canvas (using native DOM event)
   const onCanvasPointerMove = (event: PointerEvent) => {
     if (draggingImageIdInternal && isCropMode === false) {
       // console.log('Canvas pointer move');
-      pointer.x = (event.clientX / gl.domElement.clientWidth) * 2 - 1;
-      pointer.y = -(event.clientY / gl.domElement.clientHeight) * 2 + 1;
+
+      const pointer = handleMousePoint(event,gl)
+      // pointer.x = (event.clientX / gl.domElement.clientWidth) * 2 - 1;
+      // pointer.y = -(event.clientY / gl.domElement.clientHeight) * 2 + 1;
       raycaster.setFromCamera(pointer, camera);
 
       if (raycaster.ray.intersectPlane(dragPlane, intersection)) {
@@ -175,7 +176,7 @@ const CroppedImageDragger: React.FC<CroppedImageDraggerProps> = ({
     };
   }, [gl, draggingImageIdInternal, isCropMode, setCroppedImages, setDraggingImageId, dragOffsetRef, dragPlane]);
 
-   // Render the cropped images with the pointer down handler attached
+  // Render the cropped images with the pointer down handler attached
   return (
     <>
       {croppedImages.map((croppedImage) => {

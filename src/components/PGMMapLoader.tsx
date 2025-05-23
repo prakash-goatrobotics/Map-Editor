@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useRef } from 'react';
+import React, { useEffect, useState, useMemo, useRef, forwardRef } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrthographicCamera, OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
@@ -14,6 +14,8 @@ interface MapData {
   width: number;
   height: number;
 }
+
+// Record<string:THREE.Mesh> : {gt:THREE.Mesh}
 
 interface CroppedImageData extends MapData {
   id: string;
@@ -37,16 +39,21 @@ interface MapTexturePlaneProps {
   rotation?: number;
 }
 
-const MapTexturePlane: React.FC<MapTexturePlaneProps> = ({ mapData, position, rotation = 0 }) => {
-  const texture = useMemo(() => {
+// Wrap MapTexturePlane with forwardRef
+const MapTexturePlane = forwardRef<THREE.Mesh, MapTexturePlaneProps>(({ mapData, position, rotation = 0 }, ref) => {
+  const meshRef = useRef<THREE.Mesh>(null);
+  const texture = React.useMemo(() => {
     const { width, height, data } = mapData;
     const textureData = new THREE.DataTexture(data, width, height, THREE.RGBAFormat);
     textureData.needsUpdate = true;
     return textureData;
   }, [mapData]);
 
+  React.useImperativeHandle(ref, () => meshRef.current as THREE.Mesh, []);
+
   return (
     <mesh 
+      ref={meshRef}
       position={position || [0, 0, 0]}
       rotation={[0, 0, THREE.MathUtils.degToRad(rotation)]}
     >
@@ -54,7 +61,7 @@ const MapTexturePlane: React.FC<MapTexturePlaneProps> = ({ mapData, position, ro
       <meshBasicMaterial map={texture} toneMapped={false} />
     </mesh>
   );
-};
+});
 
 const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
   const [mapData, setMapData] = useState<MapData | null>(null);
@@ -63,6 +70,8 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
   const [draggingImageId, setDraggingImageId] = useState<string | null>(null);
   const cameraRef = useRef<THREE.OrthographicCamera>(null);
   const controlsRef = useRef<any>(null);
+  const cropToolRef = useRef<any>(null);
+  const mapMeshRef = useRef<any>(null);
   
   const {
     rotation,
@@ -156,6 +165,13 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
     setIsCropMode(false);
   };
 
+  // New: Save crop handler
+  const handleSaveCrop = () => {
+    if (cropToolRef.current && cropToolRef.current.getCropRect) {
+      cropToolRef.current.getCropRect(); // This will trigger the crop in CropTool
+    }
+  };
+
   if (!mapData) return <div className="flex items-center justify-center min-h-screen">Loading...</div>;
 
   return (
@@ -186,18 +202,20 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
               target={new THREE.Vector3(0, 0, 0)} 
             />
             {/* Main map */}
-            <MapTexturePlane mapData={mapData} rotation={rotation} />
+            <MapTexturePlane ref={mapMeshRef} mapData={mapData} rotation={rotation} />
             {/* Crop tool overlay */}
             {isCropMode && mapData && (
               <CropTool
+                ref={cropToolRef}
+                targetMesh={mapMeshRef.current}
                 dimensions={{
                   width: mapData.width,
                   height: mapData.height
                 }}
                 onCropComplete={handleCropComplete}
                 enabled={isCropMode}
-                selectionColor="rgba(157, 149, 173, 0.74)"
-                cropRectColor="rgba(0, 0, 255, 0.3)"
+                selectionColor="transparent"
+                cropRectColor="rgba(0,0,0,0.7)"
               />
             )}
             {/* Cropped images and dragger */}
@@ -220,12 +238,23 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
         <div className="p-4 space-y-6">
           {/* Crop Tool */}
           <div className="space-y-2">
-            <button 
-              className={`w-full px-4 py-2 text-sm text-gray-800 bg-gray-100 rounded hover:bg-gray-300 transition-colors border border-gray-300 ${isCropMode ? 'bg-blue-500 text-white' : ''}`}
-              onClick={() => setIsCropMode(!isCropMode)}
-            >
-              {isCropMode ? 'Cancel Crop' : 'Crop Map'}
-            </button>
+            {!isCropMode && (
+              <button 
+                className={`w-full px-4 py-2 text-sm text-gray-800 bg-gray-100 rounded hover:bg-gray-300 transition-colors border border-gray-300 ${!isSelected ? 'opacity-50 cursor-not-allowed' : ''}`}
+                onClick={() => isSelected && setIsCropMode(true)}
+                disabled={!isSelected}
+              >
+                Crop Map
+              </button>
+            )}
+            {isCropMode && (
+              <button 
+                className="w-full px-4 py-2 text-sm text-white bg-blue-600 rounded hover:bg-blue-700 transition-colors border border-blue-700"
+                onClick={handleSaveCrop}
+              >
+                Save Crop
+              </button>
+            )}
           </div>
           
           {/* Rotation Controls */}
