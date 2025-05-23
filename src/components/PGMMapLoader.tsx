@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useEffect, useState, useRef, forwardRef, useCallback } from "react"
+import React, { useEffect, useState, useRef, forwardRef, useCallback, useMemo } from "react"
 import { Canvas } from "@react-three/fiber"
 import { OrthographicCamera, OrbitControls } from "@react-three/drei"
 import * as THREE from "three"
@@ -42,46 +42,46 @@ interface MapTexturePlaneProps {
   rotation?: number
 }
 
-// Wrap MapTexturePlane with forwardRef
-const MapTexturePlane = forwardRef<THREE.Mesh, MapTexturePlaneProps>(({ mapData, position, rotation = 0 }, ref) => {
-  const meshRef = useRef<THREE.Mesh>(null)
-  const texture = React.useMemo(() => {
-    const { width, height, data } = mapData
-    const textureData = new THREE.DataTexture(data, width, height, THREE.RGBAFormat)
-    textureData.needsUpdate = true
-    return textureData
-  }, [mapData])
+// Wrap MapTexturePlane with forwardRef and React.memo for optimization
+const MapTexturePlane = React.memo(
+  forwardRef<THREE.Mesh, MapTexturePlaneProps>(({ mapData, position, rotation = 0 }, ref) => {
+    const meshRef = useRef<THREE.Mesh>(null)
 
-  React.useImperativeHandle(ref, () => meshRef.current as THREE.Mesh, [])
+    // Memoize texture creation to prevent unnecessary recalculations
+    const texture = useMemo(() => {
+      const { width, height, data } = mapData
+      const textureData = new THREE.DataTexture(data, width, height, THREE.RGBAFormat)
+      textureData.needsUpdate = true
+      return textureData
+    }, [mapData])
 
-  return (
-    <mesh ref={meshRef} position={position || [0, 0, 0]} rotation={[0, 0, THREE.MathUtils.degToRad(rotation)]}>
-      <planeGeometry args={[mapData.width, mapData.height]} />
-      <meshBasicMaterial
-        map={texture}
-        toneMapped={false}
-        transparent={true} // Enable transparency
-        alphaTest={0.01} // Discard pixels with very low alpha
-      />
-    </mesh>
-  )
-})
+    React.useImperativeHandle(ref, () => meshRef.current as THREE.Mesh, [])
 
-const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
+    return (
+      <mesh ref={meshRef} position={position || [0, 0, 0]} rotation={[0, 0, THREE.MathUtils.degToRad(rotation)]}>
+        <planeGeometry args={[mapData.width, mapData.height]} />
+        <meshBasicMaterial map={texture} toneMapped={false} transparent={true} alphaTest={0.01} />
+      </mesh>
+    )
+  }),
+)
+
+// Use React.memo to prevent unnecessary re-renders of the entire component
+const PGMMapLoader = React.memo<PGMMapLoaderProps>((props) => {
   const [mapData, setMapData] = useState<MapData | null>(null)
   const [isCropMode, setIsCropMode] = useState(false)
   const [croppedImages, setCroppedImages] = useState<CroppedImageData[]>([])
   const [draggingImageId, setDraggingImageId] = useState<string | null>(null)
-  const [tempCropData, setTempCropData] = useState<{ data: Uint8ClampedArray; width: number; height: number } | null>(
-    null,
-  )
+
+  // Use useRef instead of useState for data that doesn't affect rendering
+  const tempCropDataRef = useRef<{ data: Uint8ClampedArray; width: number; height: number } | null>(null)
+  const isCropToolEnabledRef = useRef(false)
+  const currentRotationRef = useRef(0)
 
   const cameraRef = useRef<THREE.OrthographicCamera>(null)
   const controlsRef = useRef<any>(null)
   const cropToolRef = useRef<any>(null)
   const mapMeshRef = useRef<any>(null)
-  const [isCropToolEnabled, setIsCropToolEnabled] = useState(false)
-  const [currentRotation, setCurrentRotation] = useState(0) // Track rotation for cropping
 
   // Store the initial camera state to prevent unwanted rotations
   const initialCameraState = useRef({
@@ -92,12 +92,12 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
 
   const { rotation, isSelected, mapContainerRef, handleRotationChange, handleMapClick } = useMapRotation()
 
-  // Update current rotation when rotation changes
+  // Update current rotation ref when rotation changes
   useEffect(() => {
-    setCurrentRotation(rotation)
+    currentRotationRef.current = rotation
   }, [rotation])
 
-  // Function to reset camera to safe state
+  // Function to reset camera to safe state - already using useCallback which is good
   const resetCameraToSafeState = useCallback(() => {
     if (cameraRef.current && controlsRef.current) {
       // Reset camera position and rotation
@@ -168,66 +168,68 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
     return () => clearInterval(interval)
   }, [isCropMode, draggingImageId, resetCameraToSafeState])
 
-  useEffect(() => {
+  // Memoize the data processing function to prevent unnecessary recreations
+  const processData = useCallback(async () => {
     const manager = PGMWorkerManager.getInstance()
 
-    const processData = async () => {
-      if (props.sourceType === "file") {
-        try {
-          const response = await fetch(props.content.data)
-          if (!response.ok) throw new Error("Failed to fetch file.")
-          const arrayBuffer = await response.arrayBuffer()
-          const imageViewer = new ImageViewer(arrayBuffer)
-          const message = {
-            mapData: {
-              info: {
-                width: imageViewer.width,
-                height: imageViewer.height,
-              },
-              data: imageViewer.data,
+    if (props.sourceType === "file") {
+      try {
+        const response = await fetch(props.content.data)
+        if (!response.ok) throw new Error("Failed to fetch file.")
+        const arrayBuffer = await response.arrayBuffer()
+        const imageViewer = new ImageViewer(arrayBuffer)
+        const message = {
+          mapData: {
+            info: {
+              width: imageViewer.width,
+              height: imageViewer.height,
             },
-            sourceType: "pgmFile",
-          }
-          const data = await manager.process(message)
-          setMapData({
-            data: data.data,
-            width: data.width,
-            height: data.height,
-          })
-        } catch (err) {
-          console.error("[PGMMapLoader] Error processing file:", err)
+            data: imageViewer.data,
+          },
+          sourceType: "pgmFile",
         }
-      } else if (props.sourceType === "ros") {
-        try {
-          const occupancyGrid = props.content
-          if (!occupancyGrid.info) throw new Error("Missing map info")
-          const width = occupancyGrid.info.width
-          const height = occupancyGrid.info.height
-          const occupancyData = new Int8Array(occupancyGrid.data)
-          const message = {
-            mapData: {
-              info: { width, height },
-              data: occupancyData,
-            },
-            sourceType: "rosMap",
-          }
-          const data = await manager.process(message)
-          setMapData({
-            data: data.data,
-            width: data.width,
-            height: data.height,
-          })
-        } catch (err) {
-          console.error("[PGMMapLoader] Error processing ROS map:", err)
+        const data = await manager.process(message)
+        setMapData({
+          data: data.data,
+          width: data.width,
+          height: data.height,
+        })
+      } catch (err) {
+        console.error("[PGMMapLoader] Error processing file:", err)
+      }
+    } else if (props.sourceType === "ros") {
+      try {
+        const occupancyGrid = props.content
+        if (!occupancyGrid.info) throw new Error("Missing map info")
+        const width = occupancyGrid.info.width
+        const height = occupancyGrid.info.height
+        const occupancyData = new Int8Array(occupancyGrid.data)
+        const message = {
+          mapData: {
+            info: { width, height },
+            data: occupancyData,
+          },
+          sourceType: "rosMap",
         }
+        const data = await manager.process(message)
+        setMapData({
+          data: data.data,
+          width: data.width,
+          height: data.height,
+        })
+      } catch (err) {
+        console.error("[PGMMapLoader] Error processing ROS map:", err)
       }
     }
-
-    processData()
   }, [props.sourceType, props.content])
 
-  // Save crop handler
-  const handleSaveCrop = () => {
+  // Call processData on mount and when dependencies change
+  useEffect(() => {
+    processData()
+  }, [processData])
+
+  // Optimize save crop handler with useCallback
+  const handleSaveCrop = useCallback(() => {
     if (cropToolRef.current) {
       const cropResult = cropToolRef.current.getCropRect()
       if (cropResult && mapData) {
@@ -241,9 +243,10 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
         // Reset rotation after cropping to prevent compounding rotations
         handleRotationChange(0)
 
-        setTempCropData(null)
+        // Update refs and state in a batch
+        tempCropDataRef.current = null
+        isCropToolEnabledRef.current = false
         setIsCropMode(false)
-        setIsCropToolEnabled(false)
 
         // Reset camera after cropping to prevent tilting
         setTimeout(() => {
@@ -251,21 +254,21 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
         }, 50)
       }
     }
-  }
+  }, [mapData, handleRotationChange, resetCameraToSafeState])
 
-  // Cancel crop
-  const handleCancelCrop = () => {
-    setTempCropData(null)
+  // Optimize cancel crop handler with useCallback
+  const handleCancelCrop = useCallback(() => {
+    tempCropDataRef.current = null
+    isCropToolEnabledRef.current = false
     setIsCropMode(false)
-    setIsCropToolEnabled(false)
 
     // Reset camera after canceling crop to prevent tilting
     setTimeout(() => {
       resetCameraToSafeState()
     }, 50)
-  }
+  }, [resetCameraToSafeState])
 
-  // Enhanced map click handler to prevent rotation issues
+  // Enhanced map click handler to prevent rotation issues - already using useCallback which is good
   const handleMapClickSafe = useCallback(
     (event: any) => {
       // Prevent any rotation during map selection
@@ -284,12 +287,51 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
     [handleMapClick, resetCameraToSafeState],
   )
 
-  if (!mapData) return <div className="flex items-center justify-center min-h-screen">Loading...</div>
+  // Memoize the crop button click handler
+  const handleCropButtonClick = useCallback(() => {
+    if (isSelected) {
+      setIsCropMode(true)
+      isCropToolEnabledRef.current = true
+    }
+  }, [isSelected])
+
+  // Memoize test rotation handlers
+  const handleTest1Click = useCallback(() => {
+    if (isSelected && !isCropMode) {
+      handleRotationChange(45)
+    }
+  }, [isSelected, isCropMode, handleRotationChange])
+
+  const handleTest2Click = useCallback(() => {
+    if (isSelected && !isCropMode) {
+      handleRotationChange(90)
+    }
+  }, [isSelected, isCropMode, handleRotationChange])
+
+  const handleTest3Click = useCallback(() => {
+    if (isSelected && !isCropMode) {
+      handleRotationChange(-30)
+    }
+  }, [isSelected, isCropMode, handleRotationChange])
+
+  const handleResetRotation = useCallback(() => {
+    if (isSelected && !isCropMode) {
+      handleRotationChange(0)
+    }
+  }, [isSelected, isCropMode, handleRotationChange])
+
+  // Memoize the loading state
+  const loadingComponent = useMemo(
+    () => <div className="flex items-center justify-center min-h-screen">Loading...</div>,
+    [],
+  )
+
+  if (!mapData) return loadingComponent
 
   return (
     <div className="relative w-screen h-screen">
       {/* Main Map View */}
-      <div ref={mapContainerRef} className="absolute inset-0 bg-[#28282B]" >
+      <div ref={mapContainerRef} className="absolute inset-0" style={{ backgroundColor: BACKGROUND_COLOR }}>
         <div
           className={`absolute inset-0 ${isSelected ? "ring-4 ring-blue-500 ring-opacity-70" : ""} cursor-pointer`}
           onClick={handleMapClickSafe}
@@ -320,11 +362,11 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
                   width: mapData.width,
                   height: mapData.height,
                 }}
-                enabled={isCropToolEnabled}
+                enabled={isCropToolEnabledRef.current}
                 selectionColor="transparent"
                 cropRectColor={BACKGROUND_COLOR} // Use the constant
                 cropRectOpacity={0.0} // Make it fully transparent
-                rotation={currentRotation} // Pass the current rotation to the crop tool
+                rotation={currentRotationRef.current} // Pass the current rotation to the crop tool
                 backgroundColor={BACKGROUND_COLOR} // Pass background color for transparent areas
               />
             )}
@@ -362,12 +404,7 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
                     ? "text-gray-800 bg-gray-100 hover:bg-gray-300 border-gray-300 cursor-pointer"
                     : "text-gray-400 bg-gray-50 border-gray-200 cursor-not-allowed opacity-50"
                 }`}
-                onClick={() => {
-                  if (isSelected) {
-                    setIsCropMode(true)
-                    setIsCropToolEnabled(true)
-                  }
-                }}
+                onClick={handleCropButtonClick}
                 disabled={!isSelected}
               >
                 Crop Map
@@ -404,6 +441,6 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
       </div>
     </div>
   )
-}
+})
 
 export default PGMMapLoader

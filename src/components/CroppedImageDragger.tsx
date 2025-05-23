@@ -1,5 +1,6 @@
-import type React from "react"
-import { useEffect, useRef, useMemo, useState } from "react"
+import React from "react"
+import type { ReactElement } from "react"
+import { useEffect, useRef, useMemo, useState, useCallback } from "react"
 import { useThree } from "@react-three/fiber"
 import * as THREE from "three"
 import type { ThreeEvent } from "@react-three/fiber"
@@ -25,8 +26,9 @@ interface MapTexturePlaneProps {
 }
 
 // Define MapTexturePlane here since it's used within CroppedImageDragger to render cropped images
-const MapTexturePlane: React.FC<MapTexturePlaneProps> = ({ mapData, position, onPointerDown }) => {
+const MapTexturePlane = React.memo<MapTexturePlaneProps> (({ mapData, position, onPointerDown }) => {
   const textureRef = useRef<THREE.DataTexture | null>(null)
+  // Memoize texture creation
   useEffect(() => {
     const { width, height, data } = mapData
     const textureData = new THREE.DataTexture(data, width, height, THREE.RGBAFormat)
@@ -34,6 +36,13 @@ const MapTexturePlane: React.FC<MapTexturePlaneProps> = ({ mapData, position, on
     textureData.format = THREE.RGBAFormat
     textureData.needsUpdate = true
     textureRef.current = textureData
+
+    //cleanup
+    return () => {
+      if (textureRef.current){
+        textureRef.current.dispose()
+      }
+    }
   }, [mapData])
 
   const meshRef = useRef<THREE.Mesh>(null)
@@ -48,10 +57,10 @@ const MapTexturePlane: React.FC<MapTexturePlaneProps> = ({ mapData, position, on
   return (
     <mesh ref={meshRef} position={position || [0, 0, 0]} onPointerDown={onPointerDown}>
       <planeGeometry args={[mapData.width, mapData.height]} />
-      <meshBasicMaterial map={textureRef.current} toneMapped={false} />
+      <meshBasicMaterial map={textureRef.current} toneMapped={false} transparent={true} />
     </mesh>
   )
-}
+})
 
 interface CroppedImageDraggerProps {
   croppedImages: CroppedImageData[]
@@ -76,7 +85,10 @@ const CroppedImageDragger: React.FC<CroppedImageDraggerProps> = ({
   // });
 
   const { camera, gl } = useThree()
-  const [draggingImageIdInternal, setDraggingImageIdInternal] = useState<string | null>(draggingImageId)
+  //const [draggingImageIdInternal, setDraggingImageIdInternal] = useState<string | null>(draggingImageId)
+  const draggingImageIdRef = useRef<string | null>
+  (draggingImageId)
+
   const dragOffsetRef = useRef<THREE.Vector3>(new THREE.Vector3())
 
   const raycaster = useMemo(() => new THREE.Raycaster(new THREE.Vector3()), [])
@@ -87,11 +99,13 @@ const CroppedImageDragger: React.FC<CroppedImageDraggerProps> = ({
 
   // Keep internal dragging state in sync with parent prop
   useEffect(() => {
-    setDraggingImageIdInternal(draggingImageId)
+    //setDraggingImageIdInternal(draggingImageId)
+    draggingImageIdRef.current = draggingImageId
   }, [draggingImageId])
 
   // Handle pointer down on a cropped image to initiate drag
-  const onImagePointerDown = (event: ThreeEvent<PointerEvent>) => {
+  const onImagePointerDown = useCallback(
+    (event: ThreeEvent<PointerEvent>) => {
     // console.log('onImagePointerDown triggered');
     if (isCropMode) {
       // console.log('Ignoring pointer down - crop mode active');
@@ -107,7 +121,7 @@ const CroppedImageDragger: React.FC<CroppedImageDraggerProps> = ({
       return
     }
 
-    setDraggingImageIdInternal(id)
+    draggingImageIdRef.current = id
     setDraggingImageId(id)
 
     event.stopPropagation()
@@ -117,23 +131,23 @@ const CroppedImageDragger: React.FC<CroppedImageDraggerProps> = ({
 
     dragOffsetRef.current.copy(event.point).sub(new THREE.Vector3(...clickedImage.position))
     // console.log('Drag offset set:', dragOffsetRef.current);
-  }
+  },
+  [isCropMode, setDraggingImageId, dragPlane],
+)
 
   // Handle pointer move while dragging on the canvas (using native DOM event)
-  const onCanvasPointerMove = (event: PointerEvent) => {
-    if (draggingImageIdInternal && isCropMode === false) {
+  const onCanvasPointerMove = useCallback((event: PointerEvent) => {
+    if (draggingImageIdRef.current && isCropMode === false) {
       // console.log('Canvas pointer move');
 
       const pointer = handleMousePoint(event, gl)
-      // pointer.x = (event.clientX / gl.domElement.clientWidth) * 2 - 1;
-      // pointer.y = -(event.clientY / gl.domElement.clientHeight) * 2 + 1;
-      raycaster.setFromCamera(pointer, camera)
+            raycaster.setFromCamera(pointer, camera)
 
       if (raycaster.ray.intersectPlane(dragPlane, intersection)) {
         // console.log('Intersection found:', intersection);
         setCroppedImages((prev) =>
           prev.map((img) => {
-            if (img.id === draggingImageIdInternal) {
+            if (img.id === draggingImageIdRef.current) {
               const newPosition = intersection.clone().sub(dragOffsetRef.current)
               // console.log('New position calculated:', newPosition);
               return { ...img, position: [newPosition.x, newPosition.y, img.position[2]] }
@@ -143,17 +157,20 @@ const CroppedImageDragger: React.FC<CroppedImageDraggerProps> = ({
         )
       }
     }
-  }
+  },
+  [gl, camera, raycaster, dragPlane, setCroppedImages, isCropMode],
+  )
 
   // Handle pointer up on the canvas to stop dragging
-  const onCanvasPointerUp = (event: PointerEvent) => {
-    if (draggingImageIdInternal) {
+  const onCanvasPointerUp = useCallback((event: PointerEvent) => {
+    if (draggingImageIdRef.current) {
       // console.log('Pointer up - ending drag');
       ;(event.target as any).releasePointerCapture(event.pointerId)
-      setDraggingImageIdInternal(null)
+      draggingImageIdRef.current = null
       setDraggingImageId(null)
     }
-  }
+  }, [setDraggingImageId],
+  )
 
   // Add global event listeners for dragging
   useEffect(() => {
@@ -164,24 +181,23 @@ const CroppedImageDragger: React.FC<CroppedImageDraggerProps> = ({
       canvas.removeEventListener("pointermove", onCanvasPointerMove)
       canvas.removeEventListener("pointerup", onCanvasPointerUp)
     }
-  }, [gl, draggingImageIdInternal, isCropMode, setCroppedImages, setDraggingImageId, dragOffsetRef, dragPlane])
+  }, [gl, onCanvasPointerMove, onCanvasPointerUp])
 
   // Render the cropped images with the pointer down handler attached
   return (
     <>
-      {croppedImages.map((croppedImage) => {
+      {croppedImages.map((croppedImage) => (
         // console.log('Rendering cropped image:', croppedImage.id);
-        return (
           <MapTexturePlane
             key={croppedImage.id}
             mapData={croppedImage}
             position={croppedImage.position}
             onPointerDown={onImagePointerDown}
           />
-        )
-      })}
+        
+      ))}
     </>
   )
 }
 
-export default CroppedImageDragger
+export default React.memo(CroppedImageDragger)

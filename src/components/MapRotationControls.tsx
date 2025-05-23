@@ -1,51 +1,62 @@
-import React from 'react';
-import { Slider, Typography, Input, Space } from 'antd';
-import { RotateLeftOutlined, RotateRightOutlined } from '@ant-design/icons';
+"use client"
+
+import React, { useCallback } from "react"
+import { Slider, Typography, Input, Space } from "antd"
+import { RotateLeftOutlined, RotateRightOutlined } from "@ant-design/icons"
 
 interface MapRotationControlsProps {
-  rotation: number;
-  isSelected: boolean;
-  onRotationChange: (value: number) => void;
-  disabled?: boolean;
+  rotation: number
+  isSelected: boolean
+  onRotationChange: (value: number) => void
+  disabled?: boolean
 }
 
-const MapRotationControls: React.FC<MapRotationControlsProps> = ({
-  rotation,
-  isSelected,
-  onRotationChange,
-}) => {
-  const handleAngleInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    // Allow empty input for better UX
-    if (value === '') {
-      onRotationChange(0);
-      return;
-    }
-    const numValue = parseFloat(value);
-    if (!isNaN(numValue) && numValue >= -180 && numValue <= 180) {
-      onRotationChange(numValue);
-    }
-  };
+// Use React.memo to prevent unnecessary re-renders
+const MapRotationControls = React.memo<MapRotationControlsProps>(({ rotation, isSelected, onRotationChange }) => {
+  // Optimize event handler with useCallback
+  const handleAngleInput = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const value = e.target.value
+      // Allow empty input for better UX
+      if (value === "") {
+        onRotationChange(0)
+        return
+      }
+      const numValue = Number.parseFloat(value)
+      if (!isNaN(numValue) && numValue >= -180 && numValue <= 180) {
+        onRotationChange(numValue)
+      }
+    },
+    [onRotationChange],
+  )
+
+  // Memoize the slider change handler
+  const handleSliderChange = useCallback(
+    (value: number) => {
+      onRotationChange(value)
+    },
+    [onRotationChange],
+  )
 
   return (
     <div className="space-y-4">
       <Typography.Text strong className="block text-gray-800">
-        Map Rotation {isSelected ? '(Selected)' : '(Not Selected)'}
+        Map Rotation {isSelected ? "(Selected)" : "(Not Selected)"}
       </Typography.Text>
-      
+
       <Space direction="vertical" className="w-full">
         <div className="flex items-center gap-2">
-          <RotateLeftOutlined style={{ color: 'black', fill: 'black' }} />
+          <RotateLeftOutlined style={{ color: "black", fill: "black" }} />
           <Slider
             className="flex-1"
             min={-180}
             max={180}
             value={rotation}
-            onChange={onRotationChange}
+            onChange={handleSliderChange}
             disabled={!isSelected}
             marks={{}}
           />
-          <RotateRightOutlined style={{ color: 'black', fill: 'black' }} />
+          <RotateRightOutlined style={{ color: "black", fill: "black" }} />
         </div>
 
         <div className="flex items-center gap-1 w-30">
@@ -64,10 +75,10 @@ const MapRotationControls: React.FC<MapRotationControlsProps> = ({
       </Space>
 
       <Typography.Text type="secondary" className="block text-sm">
-        {isSelected ? 'Click the map again to deselect' : 'Click the map to enable rotation'}
+        {isSelected ? "Click the map again to deselect" : "Click the map to enable rotation"}
       </Typography.Text>
     </div>
-  );
-};
+  )
+})
 
-export default MapRotationControls; 
+export default MapRotationControls
