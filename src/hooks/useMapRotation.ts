@@ -2,6 +2,7 @@ import { useState, useRef } from 'react';
 
 interface UseMapRotationReturn {
   rotation: number;
+  setRotation: (value: number) => void;
   isSelected: boolean;
   mapContainerRef: React.RefObject<HTMLDivElement | null>;
   handleRotationChange: (value: number) => void;
@@ -26,6 +27,7 @@ export const useMapRotation = (): UseMapRotationReturn => {
 
   return {
     rotation,
+    setRotation,
     isSelected,
     mapContainerRef,
     handleRotationChange,
