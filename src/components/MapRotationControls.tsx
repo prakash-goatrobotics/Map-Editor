@@ -1,5 +1,3 @@
-"use client"
-
 import React, { useCallback } from "react"
 import { Slider, Typography, Input, Space } from "antd"
 import { RotateLeftOutlined, RotateRightOutlined } from "@ant-design/icons"
@@ -29,12 +27,12 @@ const MapRotationControls = React.memo<MapRotationControlsProps>(({ rotation, is
     [onRotationChange],
   )
 
-  const handleQuickRotate = useCallback(
-    (degrees: number) => {
-      onRotationChange(rotation + degrees)
-    },
-    [rotation, onRotationChange],
-  )
+  // const handleQuickRotate = useCallback(
+  //   (degrees: number) => {
+  //     onRotationChange(rotation + degrees)
+  //   },
+  //   [rotation, onRotationChange],
+  // )
 
   return (
     <div className="space-y-4">
@@ -52,13 +50,13 @@ const MapRotationControls = React.memo<MapRotationControlsProps>(({ rotation, is
             suffix="°"
             min={-180}
             max={180}
-            size="small"
+            // size="small"
           />
         </div>
       </div>
 
       {/* Quick rotation buttons */}
-      <div className="flex items-center justify-center space-x-2 mb-3">
+      {/* <div className="flex items-center justify-center space-x-2 mb-3">
         <button
           onClick={() => handleQuickRotate(-90)}
           disabled={!isSelected}
@@ -79,7 +77,7 @@ const MapRotationControls = React.memo<MapRotationControlsProps>(({ rotation, is
         >
           <RotateRightOutlined className="text-sm" />
         </button>
-      </div>
+      </div> */}
 
       <Space direction="vertical" className="w-full">
         <div className="flex items-center gap-2">
@@ -91,7 +89,7 @@ const MapRotationControls = React.memo<MapRotationControlsProps>(({ rotation, is
             value={rotation}
             onChange={onRotationChange}
             disabled={!isSelected}
-            step={1}
+            //step={}
           />
           <RotateRightOutlined style={{ color: isSelected ? "#374151" : "#9CA3AF" }} />
         </div>

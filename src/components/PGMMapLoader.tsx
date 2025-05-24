@@ -1,5 +1,3 @@
-"use client"
-
 import React, { useEffect, useState, useRef, forwardRef, useCallback, useMemo } from "react"
 import { Canvas } from "@react-three/fiber"
 import { OrthographicCamera, OrbitControls } from "@react-three/drei"
@@ -13,21 +11,19 @@ import { useMapRotation } from "../hooks/useMapRotation"
 import {
   Save,
   X,
+  Move,
   Menu,
   ZoomIn,
   ZoomOut,
   RotateCcw,
   Crop,
-  Layers,
-  Move,
   MousePointer,
   Undo2,
-  Download,
-  Upload,
   Settings,
   Maximize2,
   Minimize2,
 } from "lucide-react"
+import { Slider } from 'antd'
 
 // Background color constant - used for consistency
 const BACKGROUND_COLOR = "#cdcdcd"
@@ -182,22 +178,23 @@ const PGMMapLoader = React.memo<PGMMapLoaderProps>((props) => {
   useEffect(() => {
     const interval = setInterval(() => {
       if (cameraRef.current && controlsRef.current) {
-        const currentRotation = cameraRef.current.rotation
-        if (Math.abs(currentRotation.x) > 0.01 || Math.abs(currentRotation.y) > 0.01) {
-          resetCameraToSafeState()
+        const currentRotation = cameraRef.current.rotation;
+        // Only reset camera based on rotation if mouse is on map
+        if (isMouseOnMap && (Math.abs(currentRotation.x) > 0.01 || Math.abs(currentRotation.y) > 0.01)) {
+          resetCameraToSafeState();
         }
 
         if (isCropMode || draggingImageId) {
           if (controlsRef.current.enableRotate) {
-            controlsRef.current.enableRotate = false
-            controlsRef.current.update()
+            controlsRef.current.enableRotate = false;
+            controlsRef.current.update();
           }
         }
       }
-    }, 100)
+    }, 100);
 
-    return () => clearInterval(interval)
-  }, [isCropMode, draggingImageId, resetCameraToSafeState])
+    return () => clearInterval(interval);
+  }, [isCropMode, draggingImageId, resetCameraToSafeState, isMouseOnMap]);
 
   // Memoize the data processing function to prevent unnecessary recreations
   const processData = useCallback(async () => {
@@ -296,40 +293,76 @@ const PGMMapLoader = React.memo<PGMMapLoaderProps>((props) => {
     if (cropToolRef.current) {
       const cropResult = cropToolRef.current.getCropRect()
       if (cropResult && mapData) {
+        // Save current state before cropping
         saveToUndoStack(mapData)
 
+        // Get the current rotation angle
+        const currentRotationRad = THREE.MathUtils.degToRad(rotation)
+        
+        // Create a rotation matrix
+        const rotationMatrix = new THREE.Matrix4().makeRotationZ(-currentRotationRad)
+        
+        // Apply rotation to crop coordinates
+        const centerX = cropResult.x + cropResult.width / 2
+        const centerY = cropResult.y + cropResult.height / 2
+        
+        // Rotate the center point
+        const rotatedCenter = new THREE.Vector3(centerX - mapData.width / 2, centerY - mapData.height / 2, 0)
+          .applyMatrix4(rotationMatrix)
+          .add(new THREE.Vector3(mapData.width / 2, mapData.height / 2, 0))
+        
+        // Calculate new crop dimensions
+        const rotatedWidth = Math.abs(cropResult.width * Math.cos(currentRotationRad)) + 
+                            Math.abs(cropResult.height * Math.sin(currentRotationRad))
+        const rotatedHeight = Math.abs(cropResult.width * Math.sin(currentRotationRad)) + 
+                             Math.abs(cropResult.height * Math.cos(currentRotationRad))
+
+        // Replace the original map data with the cropped data
         setMapData({
           data: cropResult.data,
           width: cropResult.width,
           height: cropResult.height,
         })
 
+        // Reset rotation after cropping to prevent compounding rotations
         handleRotationChange(0)
+
         setIsCropMode(false)
         setIsCropToolEnabled(false)
-        setActiveTool("select")
 
+        // Reset camera after cropping to prevent tilting
         setTimeout(() => {
           resetCameraToSafeState()
+          // Explicitly enable controls after exiting crop mode
+          if (controlsRef.current) {
+            controlsRef.current.enabled = true;
+            controlsRef.current.enablePan = true;
+          }
         }, 50)
       }
     }
-  }, [mapData, handleRotationChange, resetCameraToSafeState, saveToUndoStack])
+  }, [mapData, handleRotationChange, resetCameraToSafeState, saveToUndoStack, rotation])
 
   // Cancel crop
   const handleCancelCrop = useCallback(() => {
     setIsCropMode(false)
     setIsCropToolEnabled(false)
-    setActiveTool("select")
 
+    // Reset camera after canceling crop to prevent tilting
     setTimeout(() => {
       resetCameraToSafeState()
+      // Explicitly enable controls after canceling crop mode
+      if (controlsRef.current) {
+        controlsRef.current.enabled = true;
+        controlsRef.current.enablePan = true;
+      }
     }, 50)
   }, [resetCameraToSafeState])
 
   // Enhanced map click handler to prevent rotation issues
   const handleMapClickSafe = useCallback(
     (event: any) => {
+      // Prevent any rotation during map selection
       if (controlsRef.current) {
         controlsRef.current.enableRotate = false
         controlsRef.current.update()
@@ -475,7 +508,7 @@ const PGMMapLoader = React.memo<PGMMapLoaderProps>((props) => {
             >
               <RotateCcw className="w-4 h-4" />
             </button>
-            {/* <button
+            <button
               onClick={() => handleToolChange("move")}
               className={`p-2 rounded-md transition-all ${
                 activeTool === "move" ? "bg-white shadow-sm text-blue-600" : "text-gray-600 hover:bg-gray-200"
@@ -483,7 +516,7 @@ const PGMMapLoader = React.memo<PGMMapLoaderProps>((props) => {
               title="Move Tool"
             >
               <Move className="w-4 h-4" />
-            </button> */}
+            </button>
           </div>
 
           {/* Right section */}
@@ -629,32 +662,22 @@ const PGMMapLoader = React.memo<PGMMapLoaderProps>((props) => {
           </div>
 
           {/* Canvas Controls */}
-          <div className="p-4">
-            <h3 className="text-sm font-semibold text-gray-800 mb-3">Canvas</h3>
+          <div className="p-4 mt-auto">
+            <h3 className="text-sm font-semibold text-gray-800 mb-3">Canvas - Zoom
+            </h3>
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-700">Zoom</span>
-                <span className="text-sm text-gray-500">{Math.round(baseCanvasZoom * 100)}%</span>
               </div>
               <div className="flex items-center space-x-2">
-                <button
-                  onClick={handleZoomOut}
-                  className="p-1 rounded border border-gray-300 hover:bg-gray-50 transition-colors"
-                >
-                  <ZoomOut className="w-4 h-4 text-gray-600" />
-                </button>
-                <button
-                  onClick={handleZoomReset}
-                  className="flex-1 px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded transition-colors"
-                >
-                  Reset
-                </button>
-                <button
-                  onClick={handleZoomIn}
-                  className="p-1 rounded border border-gray-300 hover:bg-gray-50 transition-colors"
-                >
-                  <ZoomIn className="w-4 h-4 text-gray-600" />
-                </button>
+                <Slider
+                  min={30}
+                  max={100}
+                  step={10}
+                  value={Math.round(baseCanvasZoom * 100)}
+                  onChange={(value) => setBaseCanvasZoom(value / 100)}
+                  style={{ flex: 1, margin: '0 10px' }}
+                  tooltip={{ formatter: (value) => `${value}%` }}
+                />
               </div>
             </div>
           </div>
@@ -681,17 +704,17 @@ const PGMMapLoader = React.memo<PGMMapLoaderProps>((props) => {
 
           {/* Main Map View */}
           <div ref={mapContainerRef} className="absolute inset-0">
-            <div
-              className={`absolute inset-0 transition-all duration-300 ${
+        <div
+          className={`absolute inset-0 transition-all duration-300 ${
                 isSelected ? "ring-2 ring-blue-500 ring-opacity-70" : ""
-              } cursor-pointer`}
-              onClick={handleMapClickSafe}
+          } cursor-pointer`}
+          onClick={handleMapClickSafe}
               onMouseEnter={handleMapMouseEnter}
               onMouseLeave={handleMapMouseLeave}
-            >
-              <Canvas orthographic camera={{ zoom: 1, position: [0, 0, 100] }}>
+        >
+          <Canvas orthographic camera={{ zoom: 1, position: [0, 0, 100] }}>
                 <color attach="background" args={["white/20"]} />
-                <ambientLight />
+            <ambientLight />
                 <OrthographicCamera
                   ref={cameraRef}
                   makeDefault
@@ -702,22 +725,22 @@ const PGMMapLoader = React.memo<PGMMapLoaderProps>((props) => {
                   top={CANVAS_HEIGHT / 2}
                   bottom={-CANVAS_HEIGHT / 2}
                 />
-                <OrbitControls
-                  ref={controlsRef}
-                  enablePan={!isCropMode && !draggingImageId}
-                  enableZoom={!isCropMode && !draggingImageId}
-                  enableRotate={false}
-                  autoRotate={false}
-                  target={new THREE.Vector3(0, 0, 0)}
-                  minPolarAngle={Math.PI / 2}
-                  maxPolarAngle={Math.PI / 2}
-                  minAzimuthAngle={0}
-                  maxAzimuthAngle={0}
+            <OrbitControls
+              ref={controlsRef}
+              enablePan={!isCropMode && !draggingImageId}
+              enableZoom={!isCropMode && !draggingImageId}
+              enableRotate={false}
+              autoRotate={false}
+              target={new THREE.Vector3(0, 0, 0)}
+              minPolarAngle={Math.PI / 2}
+              maxPolarAngle={Math.PI / 2}
+              minAzimuthAngle={0}
+              maxAzimuthAngle={0}
                   minDistance={50}
                   maxDistance={200}
-                />
-                {/* Main map */}
-                <MapTexturePlane ref={mapMeshRef} mapData={mapData} rotation={rotation} />
+            />
+            {/* Main map */}
+            <MapTexturePlane ref={mapMeshRef} mapData={mapData} rotation={rotation} />
                 {/* Add border when map is selected */}
                 {/* {isSelected && mapData && (
                   <lineSegments>
@@ -725,31 +748,36 @@ const PGMMapLoader = React.memo<PGMMapLoaderProps>((props) => {
                     <lineBasicMaterial color="black" linewidth={2} />
                   </lineSegments>
                 )} */}
-                {/* Crop tool overlay */}
-                {isCropMode && mapData && (
-                  <CropTool
-                    ref={cropToolRef}
-                    targetMesh={mapMeshRef.current}
-                    dimensions={{
-                      width: mapData.width,
-                      height: mapData.height,
-                    }}
-                    enabled={isCropToolEnabled}
-                  />
-                )}
-                {/* Cropped images and dragger */}
-                <CroppedImageDragger
-                  croppedImages={croppedImages}
-                  setCroppedImages={setCroppedImages}
-                  isCropMode={isCropMode}
-                  draggingImageId={draggingImageId}
-                  setDraggingImageId={setDraggingImageId}
-                />
-              </Canvas>
-            </div>
-          </div>
+            {/* Crop tool overlay */}
+            {isCropMode && mapData && (
+              <CropTool
+                ref={cropToolRef}
+                targetMesh={mapMeshRef.current}
+                dimensions={{
+                  width: mapData.width,
+                  height: mapData.height,
+                }}
+                enabled={isCropToolEnabled}
+                    rotation={rotation}
+                selectionColor="transparent"
+                cropRectColor={BACKGROUND_COLOR}
+                cropRectOpacity={0.0}
+                backgroundColor={BACKGROUND_COLOR}
+              />
+            )}
+            {/* Cropped images and dragger */}
+            <CroppedImageDragger
+              croppedImages={croppedImages}
+              setCroppedImages={setCroppedImages}
+              isCropMode={isCropMode}
+              draggingImageId={draggingImageId}
+              setDraggingImageId={setDraggingImageId}
+            />
+          </Canvas>
         </div>
       </div>
+            </div>
+          </div>
 
       {/* Right Panel - Properties */}
       {/* {rightPanelOpen && !isFullscreen && (
@@ -761,7 +789,7 @@ const PGMMapLoader = React.memo<PGMMapLoaderProps>((props) => {
             {/* Export Options */}
             {/*<div className="space-y-3 mt-6">
               <h3 className="text-sm font-medium text-gray-700">Export</h3>
-              <div className="space-y-2">
+            <div className="space-y-2">
                 <button className="w-full px-3 py-2 text-sm bg-blue-50 text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-100 transition-all">
                   <div className="flex items-center justify-center space-x-2">
                     <Download className="w-4 h-4" />
@@ -769,12 +797,12 @@ const PGMMapLoader = React.memo<PGMMapLoaderProps>((props) => {
                   </div>
                 </button>
                 <button className="w-full px-3 py-2 text-sm bg-gray-100 text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-200 transition-all">
-                  <div className="flex items-center justify-center space-x-2">
+                    <div className="flex items-center justify-center space-x-2">
                     <Upload className="w-4 h-4" />
                     <span>Save Project</span>
-                  </div>
-                </button>
-              </div>
+                    </div>
+                  </button>
+                </div>
             </div>
           </div>
         </div>

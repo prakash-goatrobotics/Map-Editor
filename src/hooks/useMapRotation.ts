@@ -1,7 +1,4 @@
-"use client"
-
 import type React from "react"
-
 import { useState, useRef, useCallback } from "react"
 
 interface UseMapRotationReturn {
@@ -19,19 +16,17 @@ export const useMapRotation = (): UseMapRotationReturn => {
   const mapContainerRef = useRef<HTMLDivElement | null>(null)
 
   // Optimize event handlers with useCallback
-  const handleRotationChange = useCallback(
+  const handleRotationChange = 
     (value: number) => {
       if (isSelected) {
         setRotation(value)
       }
-    },
-    [isSelected],
-  )
+    }
 
-  const handleMapClick = useCallback((e: React.MouseEvent) => {
+  const handleMapClick = (e: React.MouseEvent) => {
     e.stopPropagation()
     setIsSelected((prev) => !prev) // Toggle selection state
-  }, [])
+  }
 
   return {
     rotation,
