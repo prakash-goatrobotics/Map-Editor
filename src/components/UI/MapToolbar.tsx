@@ -6,6 +6,7 @@ import {
   RotateCcw,
   Move,
   Undo2,
+  Redo2,
   Settings,
   Maximize2,
   Minimize2,

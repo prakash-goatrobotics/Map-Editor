@@ -1,5 +1,5 @@
 import type React from "react"
-import { useState, useRef, useCallback } from "react"
+import { useState, useRef } from "react"
 
 interface UseMapRotationReturn {
   rotation: number
@@ -37,3 +37,4 @@ export const useMapRotation = (): UseMapRotationReturn => {
     handleMapClick,
   }
 }
+

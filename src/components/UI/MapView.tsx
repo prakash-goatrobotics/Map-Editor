@@ -70,7 +70,7 @@ const MapView: React.FC<MapViewProps> = ({
       onMouseLeave={onMouseLeave}
     >
       <Canvas orthographic camera={{ zoom: 1, position: [0, 0, 100] }}>
-        <color attach="background" args={["white/20"]} />
+        <color attach="background" args={["gray"]} />
         <ambientLight />
         <OrthographicCamera
           ref={cameraRef}
@@ -120,6 +120,7 @@ const MapView: React.FC<MapViewProps> = ({
           draggingImageId={draggingImageId}
           setDraggingImageId={setDraggingImageId}
         />
+        
       </Canvas>
     </div>
   )

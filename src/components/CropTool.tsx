@@ -5,11 +5,10 @@ import { useThree, useFrame } from "@react-three/fiber"
 import * as THREE from "three"
 import type { RefObject } from "react"
 
-const HANDLE_RADIUS = 6 // in world units, adjust as needed
+const HANDLE_RADIUS = 8 
 const HANDLE_COLOR = "#ffffff"
 const HANDLE_HOVER_COLOR = "#666666"
 const BORDER_COLOR = "#000000"
-const BORDER_HOVER_COLOR = "#666666"
 const BACKGROUND_COLOR = "#cdcdcd" // Match the background color
 
 interface CropToolProps {

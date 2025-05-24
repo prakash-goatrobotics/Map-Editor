@@ -95,7 +95,7 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
   // Reset camera when entering crop mode
   useEffect(() => {
     if (isCropMode) {
-      resetCameraToSafeState()
+      //resetCameraToSafeState()
       if (controlsRef.current) {
         controlsRef.current.enableRotate = false
         controlsRef.current.enablePan = false
@@ -114,26 +114,15 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
     }
   }, [isCropMode, resetCameraToSafeState, draggingImageId])
 
-  // Monitor and prevent unwanted camera changes
+  // Set initial camera position and controls limits
   useEffect(() => {
-    const interval = setInterval(() => {
-      if (cameraRef.current && controlsRef.current) {
-        const currentRotation = cameraRef.current.rotation
-        if (isMouseOnMap && (Math.abs(currentRotation.x) > 0.01 || Math.abs(currentRotation.y) > 0.01)) {
-          resetCameraToSafeState()
-        }
-
-        if (isCropMode || draggingImageId) {
-          if (controlsRef.current.enableRotate) {
-            controlsRef.current.enableRotate = false
-            controlsRef.current.update()
-          }
-        }
-      }
-    }, 100)
-
-    return () => clearInterval(interval)
-  }, [isCropMode, draggingImageId, resetCameraToSafeState, isMouseOnMap])
+    if (cameraRef.current && controlsRef.current) {
+      // Set zoom limits for the controls
+      controlsRef.current.minZoom = 0.5; // Example minimum zoom (50%)
+      controlsRef.current.maxZoom = 2; // Example maximum zoom (200%)
+      controlsRef.current.update(); // Update controls after setting limits
+    }
+  }, [cameraRef, controlsRef]); // Depend on refs to ensure controls are initialized
 
   // Process data
   const processData = useCallback(async () => {
@@ -211,20 +200,20 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
       if (cropResult && mapData) {
         saveToUndoStack(mapData, rotation)
 
-        const currentRotationRad = THREE.MathUtils.degToRad(rotation)
-        const rotationMatrix = new THREE.Matrix4().makeRotationZ(-currentRotationRad)
+        // const currentRotationRad = THREE.MathUtils.degToRad(rotation)
+        // // const rotationMatrix = new THREE.Matrix4().makeRotationZ(-currentRotationRad)
         
-        const centerX = cropResult.x + cropResult.width / 2
-        const centerY = cropResult.y + cropResult.height / 2
+        // // const centerX = cropResult.x + cropResult.width / 2
+        // // const centerY = cropResult.y + cropResult.height / 2
         
-        const rotatedCenter = new THREE.Vector3(centerX - mapData.width / 2, centerY - mapData.height / 2, 0)
-          .applyMatrix4(rotationMatrix)
-          .add(new THREE.Vector3(mapData.width / 2, mapData.height / 2, 0))
+        // // const rotatedCenter = new THREE.Vector3(centerX - mapData.width / 2, centerY - mapData.height / 2, 0)
+        // //   .applyMatrix4(rotationMatrix)
+        // //   .add(new THREE.Vector3(mapData.width / 2, mapData.height / 2, 0))
         
-        const rotatedWidth = Math.abs(cropResult.width * Math.cos(currentRotationRad)) + 
-                            Math.abs(cropResult.height * Math.sin(currentRotationRad))
-        const rotatedHeight = Math.abs(cropResult.width * Math.sin(currentRotationRad)) + 
-                             Math.abs(cropResult.height * Math.cos(currentRotationRad))
+        // // const rotatedWidth = Math.abs(cropResult.width * Math.cos(currentRotationRad)) + 
+        // //                     Math.abs(cropResult.height * Math.sin(currentRotationRad))
+        // // const rotatedHeight = Math.abs(cropResult.width * Math.sin(currentRotationRad)) + 
+        // //                      Math.abs(cropResult.height * Math.cos(currentRotationRad))
 
         setMapData({
           data: cropResult.data,
@@ -253,7 +242,7 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
     setIsCropToolEnabled(false)
 
     setTimeout(() => {
-      resetCameraToSafeState()
+      //resetCameraToSafeState()
       if (controlsRef.current) {
         controlsRef.current.enabled = true
         controlsRef.current.enablePan = true
@@ -268,12 +257,7 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
         controlsRef.current.enableRotate = false
         controlsRef.current.update()
       }
-
       handleMapClick(event)
-
-      setTimeout(() => {
-        resetCameraToSafeState()
-      }, 10)
     },
     [handleMapClick, resetCameraToSafeState],
   )
@@ -305,6 +289,16 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
     },
     [isMouseOnMap],
   )
+
+  // Handle zoom in for floating controls
+  const handleZoomIn = useCallback(() => {
+    setBaseCanvasZoom((prev) => Math.min(prev + 0.1, 1));
+  }, []);
+
+  // Handle zoom out for floating controls
+  const handleZoomOut = useCallback(() => {
+    setBaseCanvasZoom((prev) => Math.max(prev - 0.1, 0.1));
+  }, []);
 
   // Loading state component
   const loadingComponent = (
@@ -393,6 +387,29 @@ const PGMMapLoader: React.FC<PGMMapLoaderProps> = (props) => {
           </div>
         </div>
       </div>
+
+      {/* Floating Zoom Controls (when in fullscreen) */}
+      {isFullscreen && (
+        <div className="absolute bottom-6 right-6 z-40 bg-white rounded-lg shadow-lg border border-gray-200 p-2">
+          <div className="flex flex-col space-y-1">
+            {/* Replace with your actual ZoomIn icon component */}
+            <button onClick={handleZoomIn} className="p-2 rounded hover:bg-gray-100 transition-colors" title="Zoom In">
+              {/* <ZoomIn className="w-4 h-4 text-gray-600" /> */}
+              +
+            </button>
+            <div className="px-2 py-1 text-xs text-gray-500 text-center">{Math.round(baseCanvasZoom * 100)}%</div>
+             {/* Replace with your actual ZoomOut icon component */}
+            <button
+              onClick={handleZoomOut}
+              className="p-2 rounded hover:bg-gray-100 transition-colors"
+              title="Zoom Out"
+            >
+              {/* <ZoomOut className="w-4 h-4 text-gray-600" /> */}
+              -
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

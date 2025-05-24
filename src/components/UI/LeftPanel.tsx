@@ -27,7 +27,7 @@ const LeftPanel: React.FC<LeftPanelProps> = ({
   onZoomChange,
 }) => {
   return (
-    <div className="w-64 bg-white border-r border-gray-200 shadow-sm mt-14 flex flex-col">
+    <div className="w-64 mt-20 ml-3 mb-5 mr-3 rounded-lg bg-white border-r border-gray-200 shadow-lg mt-14 flex flex-col">
       <div className="p-4 border-b border-gray-100">
         {/* Tool Status */}
         {!isSelected && (
@@ -86,7 +86,7 @@ const LeftPanel: React.FC<LeftPanelProps> = ({
           <div className="flex items-center space-x-2">
             <Slider
               min={30}
-              max={110}
+              max={100}
               step={10}
               value={Math.round(baseCanvasZoom * 100)}
               onChange={(value) => onZoomChange(value / 100)}
