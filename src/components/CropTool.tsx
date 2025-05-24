@@ -1,4 +1,3 @@
-"use client"
 
 import React, { useRef, useState, useEffect, useImperativeHandle, forwardRef, useMemo, useCallback } from "react"
 import { useThree, useFrame } from "@react-three/fiber"

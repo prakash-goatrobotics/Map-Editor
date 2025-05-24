@@ -10,9 +10,31 @@ import CropTool from "./CropTool"
 import CroppedImageDragger from "./CroppedImageDragger"
 import MapRotationControls from "./MapRotationControls"
 import { useMapRotation } from "../hooks/useMapRotation"
+import {
+  Save,
+  X,
+  Menu,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw,
+  Crop,
+  Layers,
+  Move,
+  MousePointer,
+  Undo2,
+  Download,
+  Upload,
+  Settings,
+  Maximize2,
+  Minimize2,
+} from "lucide-react"
 
 // Background color constant - used for consistency
 const BACKGROUND_COLOR = "#cdcdcd"
+
+// Add constants for canvas dimensions
+const CANVAS_WIDTH = 935
+const CANVAS_HEIGHT = 550
 
 interface MapData {
   data: Uint8ClampedArray
@@ -31,6 +53,7 @@ interface MapState {
 interface CroppedImageData extends MapData {
   id: string
   position: [number, number, number]
+  name?: string
 }
 
 interface PGMMapLoaderProps {
@@ -68,16 +91,14 @@ const MapTexturePlane = React.memo(
     return (
       <mesh ref={meshRef} position={position || [0, 0, 0]} rotation={[0, 0, THREE.MathUtils.degToRad(rotation)]}>
         <planeGeometry args={[mapData.width, mapData.height]} />
-        <meshBasicMaterial
-          map={texture}
-          toneMapped={false}
-          transparent={true} // Enable transparency
-          alphaTest={0.01} // Discard pixels with very low alpha
-        />
+        <meshBasicMaterial map={texture} toneMapped={false} transparent={true} alphaTest={0.01} />
       </mesh>
     )
   }),
 )
+
+// Tool types for better organization
+type ToolType = "select" | "crop" | "rotate" | "move"
 
 // Use React.memo to prevent unnecessary re-renders of the entire component
 const PGMMapLoader = React.memo<PGMMapLoaderProps>((props) => {
@@ -85,16 +106,21 @@ const PGMMapLoader = React.memo<PGMMapLoaderProps>((props) => {
   const [isCropMode, setIsCropMode] = useState(false)
   const [croppedImages, setCroppedImages] = useState<CroppedImageData[]>([])
   const [draggingImageId, setDraggingImageId] = useState<string | null>(null)
-  // Add state for undo stack
   const [undoStack, setUndoStack] = useState<MapState[]>([])
   const [canUndo, setCanUndo] = useState(false)
+  const [baseCanvasZoom, setBaseCanvasZoom] = useState(1)
+  const [isMouseOnMap, setIsMouseOnMap] = useState(false)
+  const [leftPanelOpen, setLeftPanelOpen] = useState(true)
+  const [rightPanelOpen, setRightPanelOpen] = useState(true)
+  const [activeTool, setActiveTool] = useState<ToolType>("select")
+  const [isFullscreen, setIsFullscreen] = useState(false)
 
   const cameraRef = useRef<THREE.OrthographicCamera>(null)
   const controlsRef = useRef<any>(null)
   const cropToolRef = useRef<any>(null)
   const mapMeshRef = useRef<any>(null)
   const [isCropToolEnabled, setIsCropToolEnabled] = useState(false)
-  const [currentRotation, setCurrentRotation] = useState(0) // Track rotation for cropping
+  const [currentRotation, setCurrentRotation] = useState(0)
 
   // Store the initial camera state to prevent unwanted rotations
   const initialCameraState = useRef({
@@ -113,19 +139,16 @@ const PGMMapLoader = React.memo<PGMMapLoaderProps>((props) => {
   // Function to reset camera to safe state
   const resetCameraToSafeState = useCallback(() => {
     if (cameraRef.current && controlsRef.current) {
-      // Reset camera position and rotation
       cameraRef.current.position.copy(initialCameraState.current.position)
       cameraRef.current.rotation.copy(initialCameraState.current.rotation)
       cameraRef.current.zoom = initialCameraState.current.zoom
       cameraRef.current.updateProjectionMatrix()
 
-      // Reset controls target and update
       controlsRef.current.target.set(0, 0, 0)
       controlsRef.current.object.position.copy(initialCameraState.current.position)
       controlsRef.current.object.rotation.copy(initialCameraState.current.rotation)
       controlsRef.current.update()
 
-      // Force controls to respect the disabled state
       controlsRef.current.enableRotate = !isCropMode && !draggingImageId
       controlsRef.current.enablePan = !isCropMode && !draggingImageId
       controlsRef.current.enableZoom = !isCropMode && !draggingImageId
@@ -137,7 +160,6 @@ const PGMMapLoader = React.memo<PGMMapLoaderProps>((props) => {
     if (isCropMode) {
       resetCameraToSafeState()
 
-      // Additional safety: disable all controls immediately
       if (controlsRef.current) {
         controlsRef.current.enableRotate = false
         controlsRef.current.enablePan = false
@@ -146,9 +168,8 @@ const PGMMapLoader = React.memo<PGMMapLoaderProps>((props) => {
         controlsRef.current.update()
       }
     } else {
-      // When exiting crop mode, re-enable controls but keep camera stable
       if (controlsRef.current) {
-        controlsRef.current.enableRotate = false // Keep rotation disabled by default
+        controlsRef.current.enableRotate = false
         controlsRef.current.enablePan = !draggingImageId
         controlsRef.current.enableZoom = !draggingImageId
         controlsRef.current.autoRotate = false
@@ -161,14 +182,11 @@ const PGMMapLoader = React.memo<PGMMapLoaderProps>((props) => {
   useEffect(() => {
     const interval = setInterval(() => {
       if (cameraRef.current && controlsRef.current) {
-        // Check if camera has been accidentally rotated
         const currentRotation = cameraRef.current.rotation
         if (Math.abs(currentRotation.x) > 0.01 || Math.abs(currentRotation.y) > 0.01) {
-          console.warn("Detected unwanted camera rotation, resetting...")
           resetCameraToSafeState()
         }
 
-        // Ensure controls stay disabled when they should be
         if (isCropMode || draggingImageId) {
           if (controlsRef.current.enableRotate) {
             controlsRef.current.enableRotate = false
@@ -176,7 +194,7 @@ const PGMMapLoader = React.memo<PGMMapLoaderProps>((props) => {
           }
         }
       }
-    }, 100) // Check every 100ms
+    }, 100)
 
     return () => clearInterval(interval)
   }, [isCropMode, draggingImageId, resetCameraToSafeState])
@@ -281,6 +299,27 @@ const PGMMapLoader = React.memo<PGMMapLoaderProps>((props) => {
         // Save current state before cropping
         saveToUndoStack(mapData)
 
+        // Get the current rotation angle
+        const currentRotationRad = THREE.MathUtils.degToRad(rotation)
+        
+        // Create a rotation matrix
+        const rotationMatrix = new THREE.Matrix4().makeRotationZ(-currentRotationRad)
+        
+        // Apply rotation to crop coordinates
+        const centerX = cropResult.x + cropResult.width / 2
+        const centerY = cropResult.y + cropResult.height / 2
+        
+        // Rotate the center point
+        const rotatedCenter = new THREE.Vector3(centerX - mapData.width / 2, centerY - mapData.height / 2, 0)
+          .applyMatrix4(rotationMatrix)
+          .add(new THREE.Vector3(mapData.width / 2, mapData.height / 2, 0))
+        
+        // Calculate new crop dimensions
+        const rotatedWidth = Math.abs(cropResult.width * Math.cos(currentRotationRad)) + 
+                            Math.abs(cropResult.height * Math.sin(currentRotationRad))
+        const rotatedHeight = Math.abs(cropResult.width * Math.sin(currentRotationRad)) + 
+                             Math.abs(cropResult.height * Math.cos(currentRotationRad))
+
         // Replace the original map data with the cropped data
         setMapData({
           data: cropResult.data,
@@ -300,7 +339,7 @@ const PGMMapLoader = React.memo<PGMMapLoaderProps>((props) => {
         }, 50)
       }
     }
-  }, [mapData, handleRotationChange, resetCameraToSafeState, saveToUndoStack])
+  }, [mapData, handleRotationChange, resetCameraToSafeState, saveToUndoStack, rotation])
 
   // Cancel crop
   const handleCancelCrop = useCallback(() => {
@@ -324,13 +363,74 @@ const PGMMapLoader = React.memo<PGMMapLoaderProps>((props) => {
 
       handleMapClick(event)
 
-      // Reset camera to ensure no tilting
       setTimeout(() => {
         resetCameraToSafeState()
       }, 10)
     },
     [handleMapClick, resetCameraToSafeState],
   )
+
+  // Enhanced zoom controls
+  const handleZoomIn = useCallback(() => {
+    setBaseCanvasZoom((prev) => Math.min(prev * 1.2, 3))
+  }, [])
+
+  const handleZoomOut = useCallback(() => {
+    setBaseCanvasZoom((prev) => Math.max(prev / 1.2, 0.3))
+  }, [])
+
+  const handleZoomReset = useCallback(() => {
+    setBaseCanvasZoom(1)
+  }, [])
+
+  // Tool handlers
+  const handleToolChange = useCallback(
+    (tool: ToolType) => {
+      setActiveTool(tool)
+
+      if (tool === "crop" && isSelected) {
+        setIsCropMode(true)
+        setIsCropToolEnabled(true)
+      } else {
+        setIsCropMode(false)
+        setIsCropToolEnabled(false)
+      }
+    },
+    [isSelected],
+  )
+
+  // Add handler for base canvas zoom
+  const handleBaseCanvasWheel = useCallback(
+    (event: React.WheelEvent) => {
+      if (!isMouseOnMap) {
+        event.preventDefault()
+        const zoomFactor = event.deltaY > 0 ? 0.9 : 1.1
+        setBaseCanvasZoom((prev) => Math.min(Math.max(prev * zoomFactor, 0.3), 3))
+      }
+    },
+    [isMouseOnMap],
+  )
+
+  // Add handler for map mouse events
+  const handleMapMouseEnter = useCallback(() => {
+    setIsMouseOnMap(true)
+  }, [])
+
+  const handleMapMouseLeave = useCallback(() => {
+    setIsMouseOnMap(false)
+  }, [])
+
+  // Toggle fullscreen
+  const toggleFullscreen = useCallback(() => {
+    setIsFullscreen((prev) => !prev)
+    if (!isFullscreen) {
+      setLeftPanelOpen(false)
+      setRightPanelOpen(false)
+    } else {
+      setLeftPanelOpen(true)
+      setRightPanelOpen(true)
+    }
+  }, [isFullscreen])
 
   // Loading state component
   const loadingComponent = useMemo(
@@ -345,18 +445,289 @@ const PGMMapLoader = React.memo<PGMMapLoaderProps>((props) => {
   if (!mapData) return loadingComponent
 
   return (
-    <div className="relative w-screen h-screen">
-      {/* Main Map View */}
-      <div ref={mapContainerRef} className="absolute inset-0 bg-[#28282B]">
+    <div className="relative w-screen h-screen bg-[#f5f5f5] flex overflow-hidden">
+      {/* Top Toolbar */}
+      <div className="absolute top-0 left-0 right-0 z-50 bg-white border-b border-gray-200 shadow-sm">
+        <div className="flex items-center justify-between px-4 py-2">
+          {/* Left section */}
+          <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => setLeftPanelOpen(!leftPanelOpen)}
+                className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
+              >
+                <Menu className="w-5 h-5 text-gray-600" />
+              </button>
+              <h1 className="text-lg font-semibold text-gray-800">Map Editor</h1>
+            </div>
+          </div>
+
+          {/* Center section - Tools */}
+          <div className="flex items-center space-x-1 bg-gray-100 rounded-lg p-1">
+            <button
+              onClick={() => handleToolChange("select")}
+              className={`p-2 rounded-md transition-all ${
+                activeTool === "select" ? "bg-white shadow-sm text-blue-600" : "text-gray-600 hover:bg-gray-200"
+              }`}
+              title="Select Tool"
+            >
+              <MousePointer className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => handleToolChange("crop")}
+              disabled={!isSelected}
+              className={`p-2 rounded-md transition-all ${
+                activeTool === "crop"
+                  ? "bg-white shadow-sm text-blue-600"
+                  : isSelected
+                    ? "text-gray-600 hover:bg-gray-200"
+                    : "text-gray-400 cursor-not-allowed"
+              }`}
+              title="Crop Tool"
+            >
+              <Crop className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => handleToolChange("rotate")}
+              disabled={!isSelected || isCropMode}
+              className={`p-2 rounded-md transition-all ${
+                activeTool === "rotate"
+                  ? "bg-white shadow-sm text-blue-600"
+                  : isSelected && !isCropMode
+                    ? "text-gray-600 hover:bg-gray-200"
+                    : "text-gray-400 cursor-not-allowed"
+              }`}
+              title="Rotate Tool"
+            >
+              <RotateCcw className="w-4 h-4" />
+            </button>
+            {/* <button
+              onClick={() => handleToolChange("move")}
+              className={`p-2 rounded-md transition-all ${
+                activeTool === "move" ? "bg-white shadow-sm text-blue-600" : "text-gray-600 hover:bg-gray-200"
+              }`}
+              title="Move Tool"
+            >
+              <Move className="w-4 h-4" />
+            </button> */}
+          </div>
+
+          {/* Right section */}
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={handleUndo}
+              disabled={!canUndo}
+              className={`p-2 rounded-lg transition-all ${
+                canUndo ? "text-gray-600 hover:bg-gray-100" : "text-gray-400 cursor-not-allowed"
+              }`}
+              title="Undo"
+            >
+              <Undo2 className="w-4 h-4" />
+            </button>
+            <button
+              onClick={toggleFullscreen}
+              className="p-2 rounded-lg hover:bg-gray-100 transition-colors text-gray-600"
+              title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
+            >
+              {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+            </button>
+            <button
+              onClick={() => setRightPanelOpen(!rightPanelOpen)}
+              className="p-2 rounded-lg hover:bg-gray-100 transition-colors text-gray-600"
+            >
+              <Settings className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Left Panel - Tools */}
+      {leftPanelOpen && !isFullscreen && (
+        <div className="w-64 bg-white border-r border-gray-200 shadow-sm mt-14 flex flex-col">
+          <div className="p-4 border-b border-gray-100">
+            {/* <h2 className="text-sm font-semibold text-gray-800 mb-3">Tools</h2> */}
+
+            {/* Tool Status */}
+            {!isSelected && (
+              <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg mb-4">
+                <p className="text-xs text-yellow-800">Click on the map to select it and enable tools</p>
+              </div>
+            )}
+
+            {/* Crop Tool Section */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                {/* <span className="text-sm font-medium text-gray-700">Crop Tool</span> */}
+                {isCropMode && <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">Active</span>}
+              </div>
+
+              {/*{!isCropMode && (
+                <button
+                  onClick={() => handleToolChange("crop")}
+                  disabled={!isSelected}
+                  className={`w-full px-3 py-2 text-sm rounded-lg transition-all ${
+                    isSelected
+                      ? "bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100"
+                      : "bg-gray-100 text-gray-400 cursor-not-allowed"
+                  }`}
+                >
+                  <div className="flex items-center justify-center space-x-2">
+                    <Crop className="w-4 h-4" />
+                    <span>Start Cropping</span>
+                  </div>
+                </button>
+              )}*/}
+
+              {isCropMode && (
+                <div className="flex space-x-2">
+                  <button
+                    onClick={handleSaveCrop}
+                    className="flex-1 px-3 py-2 text-sm bg-green-50 text-green-700 border border-green-200 rounded-lg hover:bg-green-100 transition-all"
+                  >
+                    <div className="flex items-center justify-center space-x-1">
+                      <Save className="w-4 h-4" />
+                      <span>Save</span>
+                    </div>
+                  </button>
+                  <button
+                    onClick={handleCancelCrop}
+                    className="flex-1 px-3 py-2 text-sm bg-gray-100 text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-200 transition-all"
+                  >
+                    <div className="flex items-center justify-center space-x-1">
+                      <X className="w-4 h-4" />
+                      <span>Cancel</span>
+                    </div>
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Rotation Controls */}
+          {activeTool === "rotate" && (
+              <div className="space-y-3 p-3">
+                <MapRotationControls
+                  rotation={rotation}
+                  isSelected={isSelected && !isCropMode}
+                  onRotationChange={handleRotationChange}
+                />
+                {isCropMode && <p className="text-xs text-gray-500 italic">Rotation is disabled during cropping</p>}
+              </div>
+            )}
+
+          {/* Layers Section */}
+          <div className="border-b border-gray-100">
+            {/* <div className="flex items-center space-x-2 mb-3">
+              <Layers className="w-4 h-4 text-gray-600" />
+              <h3 className="text-sm font-semibold text-gray-800">Layers</h3>
+            </div> */}
+
+            <div className="space-y-2">
+              {/* Main Map Layer */}
+              {/* <div
+                className={`p-2 rounded-lg border transition-all ${
+                  isSelected ? "border-blue-200 bg-blue-50" : "border-gray-200 bg-gray-50"
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-gray-700">Main Map</span>
+                  <div className="flex items-center space-x-1">
+                    {isSelected && <div className="w-2 h-2 bg-blue-500 rounded-full"></div>}
+                  </div>
+                </div>
+              </div> */}
+
+              {/* Cropped Images */}
+              {croppedImages.map((img, index) => (
+                <div key={img.id} className="p-2 rounded-lg border border-gray-200 bg-gray-50">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-700">Layer {index + 1}</span>
+                    <button
+                      onClick={() => setCroppedImages((prev) => prev.filter((i) => i.id !== img.id))}
+                      className="text-gray-400 hover:text-red-500 transition-colors"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Canvas Controls */}
+          <div className="p-4">
+            <h3 className="text-sm font-semibold text-gray-800 mb-3">Canvas</h3>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-700">Zoom</span>
+                <span className="text-sm text-gray-500">{Math.round(baseCanvasZoom * 100)}%</span>
+              </div>
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={handleZoomOut}
+                  className="p-1 rounded border border-gray-300 hover:bg-gray-50 transition-colors"
+                >
+                  <ZoomOut className="w-4 h-4 text-gray-600" />
+                </button>
+                <button
+                  onClick={handleZoomReset}
+                  className="flex-1 px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded transition-colors"
+                >
+                  Reset
+                </button>
+      <button
+                  onClick={handleZoomIn}
+                  className="p-1 rounded border border-gray-300 hover:bg-gray-50 transition-colors"
+      >
+                  <ZoomIn className="w-4 h-4 text-gray-600" />
+      </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Main Canvas Area */}
+      <div className="flex-1 flex items-center justify-center mt-14 bg-[#f5f5f5]">
+        <div
+          className="relative bg-[#cdcdcd] shadow-xl border border-gray-300 overflow-hidden"
+          onWheel={handleBaseCanvasWheel}
+          style={{
+            width: CANVAS_WIDTH,
+            height: CANVAS_HEIGHT,
+            transform: `scale(${baseCanvasZoom})`,
+            transformOrigin: "center",
+            transition: "transform 0.1s ease-out",
+          }}
+        >
+          {/* Canvas Zoom Indicator */}
+          <div className="absolute top-2 left-2 z-20 bg-black/50 text-white text-xs px-2 py-1 rounded">
+            {Math.round(baseCanvasZoom * 100)}%
+          </div>
+
+          {/* Main Map View */}
+          <div ref={mapContainerRef} className="absolute inset-0">
         <div
           className={`absolute inset-0 transition-all duration-300 ${
-            isSelected ? "ring-4 ring-blue-500 ring-opacity-70" : ""
+                isSelected ? "ring-2 ring-blue-500 ring-opacity-70" : ""
           } cursor-pointer`}
           onClick={handleMapClickSafe}
+              onMouseEnter={handleMapMouseEnter}
+              onMouseLeave={handleMapMouseLeave}
         >
           <Canvas orthographic camera={{ zoom: 1, position: [0, 0, 100] }}>
+                <color attach="background" args={["white/20"]} />
             <ambientLight />
-            <OrthographicCamera ref={cameraRef} makeDefault position={[0, 0, 100]} zoom={1} />
+                <OrthographicCamera
+                  ref={cameraRef}
+                  makeDefault
+                  position={[0, 0, 100]}
+                  zoom={1}
+                  left={-CANVAS_WIDTH / 2}
+                  right={CANVAS_WIDTH / 2}
+                  top={CANVAS_HEIGHT / 2}
+                  bottom={-CANVAS_HEIGHT / 2}
+                />
             <OrbitControls
               ref={controlsRef}
               enablePan={!isCropMode && !draggingImageId}
@@ -368,9 +739,18 @@ const PGMMapLoader = React.memo<PGMMapLoaderProps>((props) => {
               maxPolarAngle={Math.PI / 2}
               minAzimuthAngle={0}
               maxAzimuthAngle={0}
+                  minDistance={50}
+                  maxDistance={200}
             />
             {/* Main map */}
             <MapTexturePlane ref={mapMeshRef} mapData={mapData} rotation={rotation} />
+                {/* Add border when map is selected */}
+                {/* {isSelected && mapData && (
+                  <lineSegments>
+                    <edgesGeometry args={[new THREE.PlaneGeometry(mapData.width, mapData.height)]} />
+                    <lineBasicMaterial color="black" linewidth={2} />
+                  </lineSegments>
+                )} */}
             {/* Crop tool overlay */}
             {isCropMode && mapData && (
               <CropTool
@@ -381,10 +761,10 @@ const PGMMapLoader = React.memo<PGMMapLoaderProps>((props) => {
                   height: mapData.height,
                 }}
                 enabled={isCropToolEnabled}
+                    rotation={rotation}
                 selectionColor="transparent"
                 cropRectColor={BACKGROUND_COLOR}
                 cropRectOpacity={0.0}
-                rotation={currentRotation}
                 backgroundColor={BACKGROUND_COLOR}
               />
             )}
@@ -399,112 +779,56 @@ const PGMMapLoader = React.memo<PGMMapLoaderProps>((props) => {
           </Canvas>
         </div>
       </div>
-
-      {/* Right Panel with Toolbar */}
-      <div className="absolute right-0 top-0 w-80 h-full bg-white/80 shadow-lg backdrop-blur-md transition-all duration-300">
-        <div className="p-4 border-b border-gray-200 flex justify-between items-center">
-          <h2 className="text-xl font-semibold text-gray-800">Map Editor</h2>
-          <button
-            className={`px-3 py-1.5 text-sm rounded transition-all duration-200 ${
-              canUndo
-                ? "text-gray-700 bg-gray-200 hover:bg-gray-300 shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
-                : "text-gray-400 bg-gray-100 cursor-not-allowed opacity-50"
-            }`}
-            onClick={handleUndo}
-            disabled={!canUndo}
-          >
-            <div className="flex items-center space-x-1">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
-                />
-              </svg>
-              <span>Undo</span>
             </div>
-          </button>
-        </div>
-        <div className="p-4 space-y-6">
-          {/* Map Selection Status */}
-          {!isSelected && (
-            <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-md animate-pulse">
-              <p className="text-sm text-yellow-800">Click on the map to select it and enable tools</p>
-            </div>
-          )}
+          </div>
 
-          {/* Crop Tool */}
-          <div className="space-y-2">
-            {!isCropMode && (
-              <button
-                className={`w-full px-4 py-2 text-sm rounded transition-all duration-200 ${
-                  isSelected
-                    ? "text-gray-700 bg-gray-200 hover:bg-gray-300 shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
-                    : "text-gray-400 bg-gray-100 cursor-not-allowed opacity-50"
-                }`}
-                onClick={() => {
-                  if (isSelected) {
-                    setIsCropMode(true)
-                    setIsCropToolEnabled(true)
-                  }
-                }}
-                disabled={!isSelected}
-              >
-                <div className="flex items-center justify-center space-x-2">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
-                    />
-                  </svg>
-                  <span>Crop Map</span>
+      {/* Right Panel - Properties */}
+      {/* {rightPanelOpen && !isFullscreen && (
+        <div className="w-80 bg-white border-l border-gray-200 shadow-sm mt-14 flex flex-col">
+          <div className="p-4 border-b border-gray-100">
+            
+
+
+            {/* Export Options */}
+            {/*<div className="space-y-3 mt-6">
+              <h3 className="text-sm font-medium text-gray-700">Export</h3>
+            <div className="space-y-2">
+                <button className="w-full px-3 py-2 text-sm bg-blue-50 text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-100 transition-all">
+                  <div className="flex items-center justify-center space-x-2">
+                    <Download className="w-4 h-4" />
+                    <span>Export as PNG</span>
+                  </div>
+                </button>
+                <button className="w-full px-3 py-2 text-sm bg-gray-100 text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-200 transition-all">
+                    <div className="flex items-center justify-center space-x-2">
+                    <Upload className="w-4 h-4" />
+                    <span>Save Project</span>
+                    </div>
+                  </button>
                 </div>
-              </button>
-            )}
-            {isCropMode && (
-              <div className="flex space-x-2">
-                <button
-                  className="flex-1 px-4 py-2 text-sm text-gray-700 bg-gray-200 rounded hover:bg-gray-300 transition-all duration-200 shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
-                  onClick={handleSaveCrop}
-                >
-                  <div className="flex items-center justify-center space-x-2">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
-                    <span>Save Crop</span>
-                  </div>
-                </button>
-                <button
-                  className="flex-1 px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded hover:bg-gray-200 transition-all duration-200 shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
-                  onClick={handleCancelCrop}
-                >
-                  <div className="flex items-center justify-center space-x-2">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                    <span>Cancel</span>
-                  </div>
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Rotation Controls */}
-          <div className="space-y-2">
-            <MapRotationControls
-              rotation={rotation}
-              isSelected={isSelected && !isCropMode}
-              onRotationChange={handleRotationChange}
-            />
-            {isCropMode && (
-              <p className="text-xs text-gray-500 italic animate-pulse">Rotation is disabled during cropping</p>
-            )}
+            </div>
           </div>
         </div>
-      </div>
+      )} */}
+
+      {/* Floating Zoom Controls (when in fullscreen) */}
+      {isFullscreen && (
+        <div className="absolute bottom-6 right-6 z-40 bg-white rounded-lg shadow-lg border border-gray-200 p-2">
+          <div className="flex flex-col space-y-1">
+            <button onClick={handleZoomIn} className="p-2 rounded hover:bg-gray-100 transition-colors" title="Zoom In">
+              <ZoomIn className="w-4 h-4 text-gray-600" />
+            </button>
+            <div className="px-2 py-1 text-xs text-gray-500 text-center">{Math.round(baseCanvasZoom * 100)}%</div>
+            <button
+              onClick={handleZoomOut}
+              className="p-2 rounded hover:bg-gray-100 transition-colors"
+              title="Zoom Out"
+            >
+              <ZoomOut className="w-4 h-4 text-gray-600" />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 })

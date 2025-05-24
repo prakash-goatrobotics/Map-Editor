@@ -12,11 +12,10 @@ interface MapRotationControlsProps {
 }
 
 const MapRotationControls = React.memo<MapRotationControlsProps>(({ rotation, isSelected, onRotationChange }) => {
-  // Optimize event handler with useCallback
+  // Input handler (allows clearing input and ensures value stays in range)
   const handleAngleInput = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const value = e.target.value
-      // Allow empty input for better UX
       if (value === "") {
         onRotationChange(0)
         return
@@ -29,49 +28,80 @@ const MapRotationControls = React.memo<MapRotationControlsProps>(({ rotation, is
     [onRotationChange],
   )
 
+  // Quick rotate buttons handler
+  const handleQuickRotate = useCallback(
+    (degrees: number) => {
+      let newRotation = rotation + degrees
+      if (newRotation > 180) newRotation -= 360
+      if (newRotation < -180) newRotation += 360
+      onRotationChange(newRotation)
+    },
+    [rotation, onRotationChange],
+  )
+
   return (
-    <div className="flex-col space-y-4">
+    <div className="space-y-4">
       <div className="flex items-center justify-between mb-2">
-        <Typography.Text strong className="block text-gray-800">
-          Map Rotation
+        <Typography.Text strong className="block text-gray-800 text-sm">
+          Rotation
         </Typography.Text>
-        <div className="flex items-center gap-1 whitespace-nowrap">
-          <Typography.Text className="text-gray-600">Angle:</Typography.Text>
+        <div className="flex items-center gap-1">
           <Input
             type="number"
             value={rotation}
             onChange={handleAngleInput}
             disabled={!isSelected}
-            className="w-14"
+            className="w-16 text-xs"
             suffix="°"
             min={-180}
             max={180}
+            size="small"
           />
         </div>
       </div>
+
+      {/* Quick rotation buttons */}
+      <div className="flex items-center justify-center space-x-2 mb-3">
+        <button
+          onClick={() => handleQuickRotate(-90)}
+          disabled={!isSelected}
+          className={`p-1 rounded-lg transition-all ${
+            isSelected ? "bg-gray-100 hover:bg-gray-200 text-gray-700" : "bg-gray-50 text-gray-400 cursor-not-allowed"
+          }`}
+          title="Rotate -90°"
+        >
+          <RotateLeftOutlined className="text-sm" />
+        </button>
+        <button
+          onClick={() => handleQuickRotate(90)}
+          disabled={!isSelected}
+          className={`p-1 rounded-lg transition-all ${
+            isSelected ? "bg-gray-100 hover:bg-gray-200 text-gray-700" : "bg-gray-50 text-gray-400 cursor-not-allowed"
+          }`}
+          title="Rotate +90°"
+        >
+          <RotateRightOutlined className="text-sm" />
+        </button>
+      </div>
+
       <Space direction="vertical" className="w-full">
         <div className="flex items-center gap-2">
-          <RotateLeftOutlined style={{ color: "black", fill: "black" }} />
+          <RotateLeftOutlined style={{ color: isSelected ? "#374151" : "#9CA3AF" }} />
           <Slider
             className="flex-1"
             min={-180}
             max={180}
             value={rotation}
-            onChange={onRotationChange} // Direct use of onRotationChange is fine for Slider
+            onChange={onRotationChange}
             disabled={!isSelected}
-            marks={{}}
+            step={1}
           />
-          <RotateRightOutlined style={{ color: "black", fill: "black" }} />
+          <RotateRightOutlined style={{ color: isSelected ? "#374151" : "#9CA3AF" }} />
         </div>
       </Space>
-      {/*<Typography.Text type="secondary" className="block text-sm">
-        {isSelected ? "Click the map again to deselect" : "Click the map to enable rotation"}
-      </Typography.Text>*/}
     </div>
   )
 })
 
-// Add display name for better debugging
 MapRotationControls.displayName = "MapRotationControls"
-
 export default MapRotationControls
