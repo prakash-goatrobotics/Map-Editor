@@ -152,6 +152,7 @@ const CroppedImageDragger: React.FC<CroppedImageDraggerProps> = ({
               if (img.id === draggingImageIdRef.current) {
                 const newPosition = intersection.clone().sub(dragOffsetRef.current)
                 return { ...img, position: [newPosition.x, newPosition.y, img.position[2]] }
+                
               }
               return img
             }),
@@ -193,6 +194,7 @@ const CroppedImageDragger: React.FC<CroppedImageDraggerProps> = ({
           key={croppedImage.id}
           mapData={croppedImage}
           position={croppedImage.position}
+          
           onPointerDown={onImagePointerDown}
         />
       )),

@@ -1,5 +1,3 @@
-"use client"
-
 import React, { useCallback } from "react"
 import { Slider, Typography, Input, Space } from "antd"
 import { RotateLeftOutlined, RotateRightOutlined } from "@ant-design/icons"
@@ -12,10 +10,11 @@ interface MapRotationControlsProps {
 }
 
 const MapRotationControls = React.memo<MapRotationControlsProps>(({ rotation, isSelected, onRotationChange }) => {
-  // Input handler (allows clearing input and ensures value stays in range)
+  // Optimize event handler with useCallback
   const handleAngleInput = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const value = e.target.value
+      // Allow empty input for better UX
       if (value === "") {
         onRotationChange(0)
         return
@@ -28,16 +27,12 @@ const MapRotationControls = React.memo<MapRotationControlsProps>(({ rotation, is
     [onRotationChange],
   )
 
-  // Quick rotate buttons handler
-  const handleQuickRotate = useCallback(
-    (degrees: number) => {
-      let newRotation = rotation + degrees
-      if (newRotation > 180) newRotation -= 360
-      if (newRotation < -180) newRotation += 360
-      onRotationChange(newRotation)
-    },
-    [rotation, onRotationChange],
-  )
+  // const handleQuickRotate = useCallback(
+  //   (degrees: number) => {
+  //     onRotationChange(rotation + degrees)
+  //   },
+  //   [rotation, onRotationChange],
+  // )
 
   return (
     <div className="space-y-4">
@@ -55,13 +50,13 @@ const MapRotationControls = React.memo<MapRotationControlsProps>(({ rotation, is
             suffix="°"
             min={-180}
             max={180}
-            size="small"
+            // size="small"
           />
         </div>
       </div>
 
       {/* Quick rotation buttons */}
-      <div className="flex items-center justify-center space-x-2 mb-3">
+      {/* <div className="flex items-center justify-center space-x-2 mb-3">
         <button
           onClick={() => handleQuickRotate(-90)}
           disabled={!isSelected}
@@ -82,7 +77,7 @@ const MapRotationControls = React.memo<MapRotationControlsProps>(({ rotation, is
         >
           <RotateRightOutlined className="text-sm" />
         </button>
-      </div>
+      </div> */}
 
       <Space direction="vertical" className="w-full">
         <div className="flex items-center gap-2">
@@ -94,7 +89,7 @@ const MapRotationControls = React.memo<MapRotationControlsProps>(({ rotation, is
             value={rotation}
             onChange={onRotationChange}
             disabled={!isSelected}
-            step={1}
+            //step={}
           />
           <RotateRightOutlined style={{ color: isSelected ? "#374151" : "#9CA3AF" }} />
         </div>
@@ -103,5 +98,7 @@ const MapRotationControls = React.memo<MapRotationControlsProps>(({ rotation, is
   )
 })
 
+// Add display name for better debugging
 MapRotationControls.displayName = "MapRotationControls"
+
 export default MapRotationControls
